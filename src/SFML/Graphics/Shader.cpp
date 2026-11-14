@@ -53,6 +53,67 @@
 
 namespace
 {
+std::string_view getDefaultVertexShader()
+{
+#if defined(SFML_OPENGL_ES)
+    static constexpr std::string_view shader = R"(
+#version 100
+attribute vec2 position;
+attribute vec4 color;
+attribute vec2 texCoords;
+uniform mat4 matrix;
+uniform vec4 textureTransform;
+varying vec4 vertexColor;
+varying vec2 vertexTexCoords;
+void main()
+{
+    gl_Position = matrix * vec4(position, 0.0, 1.0);
+    vertexColor = color;
+    vertexTexCoords = texCoords * textureTransform.xy + textureTransform.zw;
+}
+)";
+#else
+    static constexpr std::string_view compatibilityShader = R"(
+#version 110
+attribute vec2 position;
+attribute vec4 color;
+attribute vec2 texCoords;
+uniform mat4 matrix;
+uniform vec4 textureTransform;
+varying vec4 vertexColor;
+varying vec2 vertexTexCoords;
+void main()
+{
+    gl_Position = matrix * vec4(position, 0.0, 1.0);
+    gl_FrontColor = color;
+    gl_BackColor = color;
+    gl_TexCoord[0] = vec4(texCoords * textureTransform.xy + textureTransform.zw, 0.0, 1.0);
+    vertexColor = color;
+    vertexTexCoords = texCoords * textureTransform.xy + textureTransform.zw;
+}
+)";
+
+    static constexpr std::string_view coreShader = R"(
+#version 140
+in vec2 position;
+in vec4 color;
+in vec2 texCoords;
+uniform mat4 matrix;
+uniform vec4 textureTransform;
+out vec4 vertexColor;
+out vec2 vertexTexCoords;
+void main()
+{
+    gl_Position = matrix * vec4(position, 0.0, 1.0);
+    vertexColor = color;
+    vertexTexCoords = texCoords * textureTransform.xy + textureTransform.zw;
+}
+)";
+
+    return sf::priv::isCoreProfile() ? coreShader : compatibilityShader;
+#endif
+}
+
 // Retrieve the maximum number of texture units available
 std::size_t getMaxTextureUnits()
 {
@@ -849,6 +910,9 @@ bool Shader::compile(std::string_view vertexShaderCode, std::string_view geometr
         return false;
     }
 
+    if (vertexShaderCode.empty() && !fragmentShaderCode.empty())
+        vertexShaderCode = getDefaultVertexShader();
+
     // Make sure we can use geometry shaders
     if (!geometryShaderCode.empty() && !isGeometryAvailable())
     {
@@ -964,7 +1028,31 @@ void Shader::bindTextures() const
 
 
 ////////////////////////////////////////////////////////////
-int Shader::getUniformLocation(const std::string& name)
+void Shader::setUniformIfPresent(const std::string& name, const Glsl::Vec4& value) const
+{
+    if (m_shaderProgram)
+    {
+        const int location = getUniformLocation(name, false);
+        if (location != -1)
+            glCheck(glUniform4f(location, value.x, value.y, value.z, value.w));
+    }
+}
+
+
+////////////////////////////////////////////////////////////
+void Shader::setUniformIfPresent(const std::string& name, const Glsl::Mat4& value) const
+{
+    if (m_shaderProgram)
+    {
+        const int location = getUniformLocation(name, false);
+        if (location != -1)
+            glCheck(glUniformMatrix4fv(location, 1, GL_FALSE, value.array.data()));
+    }
+}
+
+
+////////////////////////////////////////////////////////////
+int Shader::getUniformLocation(const std::string& name, bool warnIfMissing) const
 {
     // Check the cache
     if (const auto it = m_uniforms.find(name); it != m_uniforms.end())
@@ -977,7 +1065,7 @@ int Shader::getUniformLocation(const std::string& name)
     const int location = glGetUniformLocation(m_shaderProgram, name.c_str());
     m_uniforms.try_emplace(name, location);
 
-    if (location == -1)
+    if (location == -1 && warnIfMissing)
         err() << "Uniform " << std::quoted(name) << " not found in shader" << std::endl;
 
     return location;

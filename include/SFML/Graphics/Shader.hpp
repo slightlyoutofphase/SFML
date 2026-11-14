@@ -44,6 +44,7 @@
 namespace sf
 {
 class InputStream;
+class RenderTarget;
 class Texture;
 
 ////////////////////////////////////////////////////////////
@@ -872,6 +873,13 @@ private:
     void bindTextures() const;
 
     ////////////////////////////////////////////////////////////
+    /// \brief Set an SFML-provided uniform if it exists in this shader
+    ///
+    ////////////////////////////////////////////////////////////
+    void setUniformIfPresent(const std::string& name, const Glsl::Vec4& value) const;
+    void setUniformIfPresent(const std::string& name, const Glsl::Mat4& value) const;
+
+    ////////////////////////////////////////////////////////////
     /// \brief Get the location ID of a shader uniform
     ///
     /// \param name Name of the uniform variable to search
@@ -879,7 +887,7 @@ private:
     /// \return Location ID of the uniform, or -1 if not found
     ///
     ////////////////////////////////////////////////////////////
-    int getUniformLocation(const std::string& name);
+    int getUniformLocation(const std::string& name, bool warnIfMissing = true) const;
 
     ////////////////////////////////////////////////////////////
     /// \brief RAII object to save and restore the program
@@ -899,10 +907,12 @@ private:
     ////////////////////////////////////////////////////////////
     // Member data
     ////////////////////////////////////////////////////////////
-    unsigned int m_shaderProgram{};    //!< OpenGL identifier for the program
-    int          m_currentTexture{-1}; //!< Location of the current texture in the shader
-    TextureTable m_textures;           //!< Texture variables in the shader, mapped to their location
-    UniformTable m_uniforms;           //!< Parameters location cache
+    friend class RenderTarget;
+
+    unsigned int         m_shaderProgram{};    //!< OpenGL identifier for the program
+    int                  m_currentTexture{-1}; //!< Location of the current texture in the shader
+    TextureTable         m_textures;           //!< Texture variables in the shader, mapped to their location
+    mutable UniformTable m_uniforms;           //!< Parameters location cache
 };
 
 } // namespace sf
@@ -930,6 +940,18 @@ private:
 /// language dedicated to OpenGL shaders. You'll probably
 /// need to learn its basics before writing your own shaders
 /// for SFML.
+///
+/// When drawing with a custom vertex shader, SFML automatically updates
+/// the optional \p mat4 uniform \p matrix with the combined view and object
+/// transform, and the optional \p vec4 uniform \p textureTransform with the
+/// current texture-coordinate scale and offset. A custom vertex shader can
+/// use these uniforms to preserve SFML's normal view, object, and texture
+/// coordinate transformations.
+///
+/// When only a fragment shader is supplied, SFML provides the vertex stage.
+/// Its outputs are \p vertexColor and \p vertexTexCoords. On desktop
+/// compatibility contexts it also provides the legacy \p gl_Color and
+/// \p gl_TexCoord[0] outputs for fragment shaders that use those built-ins.
 ///
 /// Like any C/C++ program, a GLSL shader has its own variables
 /// called _uniforms_ that you can set from your C++ application.

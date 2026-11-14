@@ -35,6 +35,7 @@
 #include <SFML/Graphics/VertexBuffer.hpp>
 
 #include <SFML/Window/Context.hpp>
+#include <SFML/Window/GlResource.hpp>
 
 #include <SFML/System/EnumArray.hpp>
 #include <SFML/System/Err.hpp>
@@ -58,7 +59,7 @@ namespace
 // A nested named namespace is used here to allow unity builds of SFML.
 namespace RenderTargetImpl
 {
-struct RendererResources
+struct RendererResources : sf::GlResource
 {
     sf::Shader               shader;
     sf::VertexBuffer         vertexBuffer{sf::VertexBuffer::Usage::Stream};
@@ -67,6 +68,11 @@ struct RendererResources
     GLuint                   vertexArray{};
     bool                     coreProfile{};
     bool                     initialized{};
+
+    void registerWithContext(const std::shared_ptr<RendererResources>& self)
+    {
+        registerUnsharedGlObject(self);
+    }
 };
 
 struct VertexAttributeState
@@ -90,6 +96,8 @@ struct GLStateSnapshot
     std::vector<GLint>                  textures;
     std::array<GLint, 4>                viewport{};
     std::array<GLint, 4>                scissorBox{};
+    std::array<GLfloat, 4>              clearColor{};
+    GLint                               clearStencil{};
     std::array<GLboolean, 4>            colorMask{};
     std::array<GLint, 2>                blendFactors{};
     std::array<GLint, 2>                blendFactorsAlpha{};
@@ -130,31 +138,38 @@ bool isCoreProfile()
 
 RendererResources& getRendererResources()
 {
-    static std::mutex                                           mutex;
-    static std::unordered_map<std::uint64_t, RendererResources> resources;
+    static std::mutex                                                          mutex;
+    static std::unordered_map<std::uint64_t, std::weak_ptr<RendererResources>> resources;
 
     const std::uint64_t   contextId = sf::Context::getActiveContextId();
     const std::lock_guard lock(mutex);
-    auto&                 renderer = resources[contextId];
+    auto                  renderer = resources[contextId].lock();
 
-    if (!renderer.initialized)
+    if (!renderer)
+    {
+        renderer             = std::make_shared<RendererResources>();
+        resources[contextId] = renderer;
+        renderer->registerWithContext(renderer);
+    }
+
+    if (!renderer->initialized)
     {
         sf::priv::ensureExtensionsInit();
-        renderer.coreProfile = isCoreProfile();
+        renderer->coreProfile = isCoreProfile();
 
 #ifndef SFML_OPENGL_ES
-        if (renderer.coreProfile)
+        if (renderer->coreProfile)
         {
-            renderer.genVertexArrays = reinterpret_cast<PFNGLGENVERTEXARRAYSPROC>(
+            renderer->genVertexArrays = reinterpret_cast<PFNGLGENVERTEXARRAYSPROC>(
                 sf::Context::getFunction("glGenVertexArrays"));
-            renderer.bindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYPROC>(
+            renderer->bindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYPROC>(
                 sf::Context::getFunction("glBindVertexArray"));
 
-            if (!renderer.genVertexArrays || !renderer.bindVertexArray)
+            if (!renderer->genVertexArrays || !renderer->bindVertexArray)
             {
                 sf::err() << "Failed to initialize OpenGL core-profile vertex array entry points" << std::endl;
-                renderer.initialized = true;
-                return renderer;
+                renderer->initialized = true;
+                return *renderer;
             }
         }
 #endif
@@ -249,31 +264,31 @@ void main()
 }
 )";
 
-        const std::string_view vertexShader   = renderer.coreProfile ? coreVertexShader : compatibilityVertexShader;
-        const std::string_view fragmentShader = renderer.coreProfile ? coreFragmentShader : compatibilityFragmentShader;
+        const std::string_view vertexShader = renderer->coreProfile ? coreVertexShader : compatibilityVertexShader;
+        const std::string_view fragmentShader = renderer->coreProfile ? coreFragmentShader : compatibilityFragmentShader;
 #endif
 
-        const bool shaderLoaded = renderer.shader.loadFromMemory(vertexShader, fragmentShader);
+        const bool shaderLoaded = renderer->shader.loadFromMemory(vertexShader, fragmentShader);
 
         if (!shaderLoaded)
         {
             sf::err() << "Failed to initialize SFML's internal renderer shader" << std::endl;
-            renderer.initialized = true;
-            return renderer;
+            renderer->initialized = true;
+            return *renderer;
         }
 
-        if (!renderer.vertexBuffer.create(4))
+        if (!renderer->vertexBuffer.create(4))
         {
             sf::err() << "Failed to initialize SFML's internal renderer vertex buffer" << std::endl;
-            renderer.initialized = true;
-            return renderer;
+            renderer->initialized = true;
+            return *renderer;
         }
 
-        renderer.shader.setUniform("sfmlTexture", sf::Shader::CurrentTexture);
-        renderer.initialized = true;
+        renderer->shader.setUniform("sfmlTexture", sf::Shader::CurrentTexture);
+        renderer->initialized = true;
     }
 
-    return renderer;
+    return *renderer;
 }
 
 void pushGLStateSnapshot()
@@ -297,6 +312,8 @@ void pushGLStateSnapshot()
     glCheck(glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &snapshot.arrayBuffer));
     glCheck(glGetIntegerv(GL_VIEWPORT, snapshot.viewport.data()));
     glCheck(glGetIntegerv(GL_SCISSOR_BOX, snapshot.scissorBox.data()));
+    glCheck(glGetFloatv(GL_COLOR_CLEAR_VALUE, snapshot.clearColor.data()));
+    glCheck(glGetIntegerv(GL_STENCIL_CLEAR_VALUE, &snapshot.clearStencil));
     glCheck(glGetBooleanv(GL_COLOR_WRITEMASK, snapshot.colorMask.data()));
 
     snapshot.blendEnabled   = glIsEnabled(GL_BLEND) == GL_TRUE;
@@ -423,6 +440,8 @@ bool popGLStateSnapshot()
 
     glCheck(glViewport(snapshot.viewport[0], snapshot.viewport[1], snapshot.viewport[2], snapshot.viewport[3]));
     glCheck(glScissor(snapshot.scissorBox[0], snapshot.scissorBox[1], snapshot.scissorBox[2], snapshot.scissorBox[3]));
+    glCheck(glClearColor(snapshot.clearColor[0], snapshot.clearColor[1], snapshot.clearColor[2], snapshot.clearColor[3]));
+    glCheck(glClearStencil(snapshot.clearStencil));
     glCheck(glColorMask(snapshot.colorMask[0], snapshot.colorMask[1], snapshot.colorMask[2], snapshot.colorMask[3]));
     glCheck(glBlendFuncSeparate(static_cast<GLenum>(snapshot.blendFactors[0]),
                                 static_cast<GLenum>(snapshot.blendFactors[1]),
@@ -968,6 +987,11 @@ void RenderTarget::popGLStates()
     {
         if (!RenderTargetImpl::popGLStateSnapshot())
             err() << "sf::RenderTarget::popGLStates called without a matching pushGLStates" << std::endl;
+        else
+        {
+            m_cache.enable      = false;
+            m_cache.glStatesSet = false;
+        }
     }
 }
 
@@ -1234,40 +1258,45 @@ bool RenderTarget::setupDraw(const RenderStates& states)
             applyTexture(states.texture, states.coordinateType);
     }
 
+    const Transform matrix = m_view.getTransform() * states.transform;
+
+    Glsl::Vec4 textureTransform(1.f, 1.f, 0.f, 0.f);
+    if (states.texture)
+    {
+        const Texture& texture = *states.texture;
+        if (states.coordinateType == CoordinateType::Pixels)
+        {
+            textureTransform.x = 1.f / static_cast<float>(texture.m_actualSize.x);
+            textureTransform.y = 1.f / static_cast<float>(texture.m_actualSize.y);
+        }
+        else if (texture.m_size != texture.m_actualSize)
+        {
+            textureTransform.x = static_cast<float>(texture.m_size.x) / static_cast<float>(texture.m_actualSize.x);
+            textureTransform.y = static_cast<float>(texture.m_size.y) / static_cast<float>(texture.m_actualSize.y);
+        }
+
+        if (texture.m_pixelsFlipped)
+        {
+            textureTransform.y = -textureTransform.y;
+            textureTransform.w = static_cast<float>(texture.m_size.y) / static_cast<float>(texture.m_actualSize.y);
+        }
+    }
+
     // Apply the shader
     if (states.shader)
+    {
         applyShader(states.shader);
+        states.shader->setUniformIfPresent("matrix", Glsl::Mat4(matrix));
+        states.shader->setUniformIfPresent("textureTransform", textureTransform);
+    }
     else
     {
         auto& renderer = RenderTargetImpl::getRendererResources();
         if (!renderer.shader.getNativeHandle())
             return false;
 
-        const Transform matrix = m_view.getTransform() * states.transform;
         renderer.shader.setUniform("matrix", Glsl::Mat4(matrix));
         renderer.shader.setUniform("hasTexture", states.texture ? 1 : 0);
-
-        Glsl::Vec4 textureTransform(1.f, 1.f, 0.f, 0.f);
-        if (states.texture)
-        {
-            const Texture& texture = *states.texture;
-            if (states.coordinateType == CoordinateType::Pixels)
-            {
-                textureTransform.x = 1.f / static_cast<float>(texture.m_actualSize.x);
-                textureTransform.y = 1.f / static_cast<float>(texture.m_actualSize.y);
-            }
-            else if (texture.m_size != texture.m_actualSize)
-            {
-                textureTransform.x = static_cast<float>(texture.m_size.x) / static_cast<float>(texture.m_actualSize.x);
-                textureTransform.y = static_cast<float>(texture.m_size.y) / static_cast<float>(texture.m_actualSize.y);
-            }
-
-            if (texture.m_pixelsFlipped)
-            {
-                textureTransform.y = -textureTransform.y;
-                textureTransform.w = static_cast<float>(texture.m_size.y) / static_cast<float>(texture.m_actualSize.y);
-            }
-        }
         renderer.shader.setUniform("textureTransform", textureTransform);
         applyShader(&renderer.shader);
     }

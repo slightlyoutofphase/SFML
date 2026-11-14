@@ -92,6 +92,38 @@ TEST_CASE("[Graphics] Render Tests", runDisplayTests())
 
         CHECK(finalStackDepths == originalStackDepths);
         CHECK(finalMatrices == originalMatrices);
+
+        sf::Image   blueImage({1, 1}, sf::Color::Blue);
+        sf::Texture blueTexture(blueImage);
+        blueTexture.setRepeated(true);
+        blueTexture.setRepeated(false);
+
+        glBindTexture(GL_TEXTURE_2D, blueTexture.getNativeHandle());
+        GLint textureWrap{};
+        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &textureWrap);
+        CHECK(textureWrap == 0x812F); // GL_CLAMP_TO_EDGE
+
+        const std::string_view fragmentShader = R"(
+uniform sampler2D image;
+void main()
+{
+    gl_FragColor = texture2D(image, gl_TexCoord[0].xy) * gl_Color;
+}
+)";
+        sf::Shader             shader(fragmentShader, sf::Shader::Type::Fragment);
+        shader.setUniform("image", sf::Shader::CurrentTexture);
+
+        shape.setSize({8, 8});
+        shape.setPosition({8, 8});
+        shape.setTexture(&blueTexture);
+        sf::RenderStates states;
+        states.shader = &shader;
+
+        renderTexture.clear(sf::Color::Black);
+        renderTexture.draw(shape, states);
+        renderTexture.display();
+        CHECK(renderTexture.getTexture().copyToImage().getPixel({12, 12}) == sf::Color::Blue);
+        CHECK(renderTexture.getTexture().copyToImage().getPixel({4, 4}) == sf::Color::Black);
     }
 #endif
 
@@ -137,11 +169,13 @@ TEST_CASE("[Graphics] Render Tests", runDisplayTests())
 in vec2 position;
 in vec4 color;
 in vec2 texCoords;
+uniform mat4 matrix;
+uniform vec4 textureTransform;
 out vec2 textureCoordinate;
 void main()
 {
-    gl_Position = vec4(position.x / 16.0 - 1.0, 1.0 - position.y / 16.0, 0.0, 1.0);
-    textureCoordinate = texCoords;
+    gl_Position = matrix * vec4(position, 0.0, 1.0);
+    textureCoordinate = texCoords * textureTransform.xy + textureTransform.zw;
 }
 )";
         const std::string_view fragmentShader = R"(
@@ -170,8 +204,11 @@ void main()
         glEnable(GL_SCISSOR_TEST);
         glViewport(2, 3, 8, 9);
         glScissor(4, 5, 6, 7);
+        glClearColor(0.25f, 0.5f, 0.75f, 0.125f);
+        glClearStencil(42);
 
         renderTexture.pushGLStates();
+        renderTexture.clear(sf::Color::Red, 127);
         renderTexture.draw(shape);
         renderTexture.popGLStates();
 
@@ -185,6 +222,29 @@ void main()
         glGetIntegerv(GL_SCISSOR_BOX, scissorBox.data());
         CHECK((viewport == std::array<GLint, 4>{2, 3, 8, 9}));
         CHECK((scissorBox == std::array<GLint, 4>{4, 5, 6, 7}));
+
+        std::array<GLfloat, 4> clearColor{};
+        GLint                  clearStencil{};
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor.data());
+        glGetIntegerv(GL_STENCIL_CLEAR_VALUE, &clearStencil);
+        CHECK(clearColor == std::array<GLfloat, 4>{0.25f, 0.5f, 0.75f, 0.125f});
+        CHECK(clearStencil == 42);
+    }
+
+    SECTION("Renderer context resources follow context lifetime")
+    {
+        for (int i = 0; i < 3; ++i)
+        {
+            sf::RenderTexture renderTexture({16, 16});
+            renderTexture.clear(sf::Color::Black);
+
+            sf::RectangleShape shape({16, 16});
+            shape.setFillColor(sf::Color::Green);
+            renderTexture.draw(shape);
+            renderTexture.display();
+
+            CHECK(renderTexture.getTexture().copyToImage().getPixel({8, 8}) == sf::Color::Green);
+        }
     }
 
     SECTION("Stencil Tests")

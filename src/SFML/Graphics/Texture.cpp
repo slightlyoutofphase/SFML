@@ -281,23 +281,6 @@ bool Texture::resize(Vector2u size, bool sRgb)
     // Make sure that the current texture binding will be preserved
     const priv::TextureSaver save;
 
-    static const bool textureEdgeClamp = GLEXT_texture_edge_clamp || GLEXT_GL_VERSION_1_2 ||
-                                         Context::isExtensionAvailable("GL_EXT_texture_edge_clamp");
-
-    if (!textureEdgeClamp)
-    {
-        static bool warned = false;
-
-        if (!warned)
-        {
-            err() << "OpenGL extension SGIS_texture_edge_clamp unavailable" << '\n'
-                  << "Artifacts may occur along texture edges" << '\n'
-                  << "Ensure that hardware acceleration is enabled if available" << std::endl;
-
-            warned = true;
-        }
-    }
-
     static const bool textureSrgb = GLEXT_texture_sRGB;
 
     m_sRgb = sRgb;
@@ -321,11 +304,7 @@ bool Texture::resize(Vector2u size, bool sRgb)
         m_sRgb = false;
     }
 
-#ifndef SFML_OPENGL_ES
-    const GLint textureWrapParam = m_isRepeated ? GL_REPEAT : (textureEdgeClamp ? GLEXT_GL_CLAMP_TO_EDGE : GLEXT_GL_CLAMP);
-#else
-    const GLint textureWrapParam = m_isRepeated ? GL_REPEAT : GLEXT_GL_CLAMP_TO_EDGE;
-#endif
+    const GLint textureWrapParam = m_isRepeated ? GL_REPEAT : GL_CLAMP_TO_EDGE;
 
     // Initialize the texture
     glCheck(glBindTexture(GL_TEXTURE_2D, m_texture));
@@ -851,27 +830,7 @@ void Texture::setRepeated(bool repeated)
     // Make sure that the current texture binding will be preserved
     const priv::TextureSaver save;
 
-    static const bool textureEdgeClamp = GLEXT_texture_edge_clamp;
-
-    if (!m_isRepeated && !textureEdgeClamp)
-    {
-        static bool warned = false;
-
-        if (!warned)
-        {
-            err() << "OpenGL extension SGIS_texture_edge_clamp unavailable" << '\n'
-                  << "Artifacts may occur along texture edges" << '\n'
-                  << "Ensure that hardware acceleration is enabled if available" << std::endl;
-
-            warned = true;
-        }
-    }
-
-#ifndef SFML_OPENGL_ES
-    const GLint textureWrapParam = m_isRepeated ? GL_REPEAT : (textureEdgeClamp ? GLEXT_GL_CLAMP_TO_EDGE : GLEXT_GL_CLAMP);
-#else
-    const GLint textureWrapParam = m_isRepeated ? GL_REPEAT : GLEXT_GL_CLAMP_TO_EDGE;
-#endif
+    const GLint textureWrapParam = m_isRepeated ? GL_REPEAT : GL_CLAMP_TO_EDGE;
 
     glCheck(glBindTexture(GL_TEXTURE_2D, m_texture));
     glCheck(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, textureWrapParam));
