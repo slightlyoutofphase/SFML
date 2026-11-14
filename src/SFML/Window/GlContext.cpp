@@ -710,11 +710,21 @@ std::uint64_t GlContext::getActiveContextId()
     return GlContextImpl::CurrentContext::get().id;
 }
 
+////////////////////////////////////////////////////////////
+void cleanupContextData(std::uint64_t contextId)
+{
+    if (!contextId)
+        return;
+
+    cleanupRenderTargetContextData(contextId);
+}
 
 ////////////////////////////////////////////////////////////
 GlContext::~GlContext()
 {
     auto& currentContext = GlContextImpl::CurrentContext::get();
+
+    cleanupContextData(m_impl->id);
 
     if (m_impl->id == currentContext.id)
     {
@@ -865,6 +875,8 @@ void GlContext::cleanupUnsharedResources()
             }
         }
     }
+
+    cleanupContextData(m_impl->id);
 
     // Make the originally active context active again
     if (contextToRestore)

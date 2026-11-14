@@ -684,10 +684,11 @@ public:
     /// // draw OpenGL stuff that use no texture...
     /// \endcode
     ///
-    /// Texture-coordinate conversion is applied by SFML's own drawing
-    /// shaders. When using this function with custom OpenGL rendering,
-    /// the shader must perform any required coordinate conversion itself.
-    /// The `coordinateType` argument is retained for API compatibility.
+    /// Texture-coordinate conversion is handled by SFML's own drawing
+    /// shaders on programmable contexts. On legacy compatibility contexts,
+    /// the OpenGL texture matrix is updated to preserve the historical
+    /// behavior of `CoordinateType::Pixels`. Custom OpenGL rendering on
+    /// programmable contexts must perform its own conversion.
     ///
     /// \param texture Pointer to the texture to bind, can be null to use no texture
     /// \param coordinateType Type of texture coordinates to use

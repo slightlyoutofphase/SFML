@@ -893,9 +893,53 @@ void Texture::invalidateMipmap()
 
 
 ////////////////////////////////////////////////////////////
-void Texture::bind(const Texture* texture, CoordinateType)
+void Texture::bind(const Texture* texture, CoordinateType coordinateType)
 {
+    const TransientContextLock lock;
+
+    // The legacy fixed-function texture matrix still matters on compatibility contexts.
+    // Programmable-only backends require any coordinate conversion in the shader itself.
+    const bool legacyTextureMatrix = !sf::priv::isCoreProfile();
+    GLint      previousMatrixMode = GL_MODELVIEW;
+
+    if (legacyTextureMatrix)
+    {
+        glCheck(glGetIntegerv(GL_MATRIX_MODE, &previousMatrixMode));
+        glCheck(glMatrixMode(GL_TEXTURE));
+        glCheck(glPushMatrix());
+        glCheck(glLoadIdentity());
+
+        if (texture)
+        {
+            const float scaleX = (coordinateType == CoordinateType::Pixels)
+                                     ? (1.f / static_cast<float>(texture->m_actualSize.x))
+                                     : (static_cast<float>(texture->m_size.x) /
+                                        static_cast<float>(texture->m_actualSize.x));
+            const float scaleY = (coordinateType == CoordinateType::Pixels)
+                                     ? (1.f / static_cast<float>(texture->m_actualSize.y))
+                                     : (static_cast<float>(texture->m_size.y) /
+                                        static_cast<float>(texture->m_actualSize.y));
+
+            glCheck(glScalef(scaleX, scaleY, 1.f));
+
+            if (texture->m_pixelsFlipped)
+            {
+                glCheck(glScalef(1.f, -1.f, 1.f));
+                glCheck(glTranslatef(0.f,
+                                    static_cast<float>(texture->m_size.y) / static_cast<float>(texture->m_actualSize.y),
+                                    0.f));
+            }
+        }
+    }
+
     bindForRendering(texture);
+
+    if (legacyTextureMatrix)
+    {
+        glCheck(glMatrixMode(GL_TEXTURE));
+        glCheck(glPopMatrix());
+        glCheck(glMatrixMode(static_cast<GLenum>(previousMatrixMode)));
+    }
 }
 
 ////////////////////////////////////////////////////////////

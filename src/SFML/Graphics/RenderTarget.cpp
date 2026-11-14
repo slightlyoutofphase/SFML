@@ -136,19 +136,41 @@ bool isCoreProfile()
     return sf::priv::isCoreProfile();
 }
 
+std::mutex& getRendererResourcesMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::unordered_map<std::uint64_t, std::weak_ptr<RendererResources>>& getRendererResourcesMap()
+{
+    static std::unordered_map<std::uint64_t, std::weak_ptr<RendererResources>> resources;
+    return resources;
+}
+
+void cleanupContextResources(std::uint64_t contextId)
+{
+    {
+        const std::lock_guard lock(getRendererResourcesMutex());
+        getRendererResourcesMap().erase(contextId);
+    }
+
+    {
+        const std::lock_guard lock(getGLStateSnapshotMutex());
+        getGLStateSnapshotStacks().erase(contextId);
+    }
+}
+
 RendererResources& getRendererResources()
 {
-    static std::mutex                                                          mutex;
-    static std::unordered_map<std::uint64_t, std::weak_ptr<RendererResources>> resources;
-
     const std::uint64_t   contextId = sf::Context::getActiveContextId();
-    const std::lock_guard lock(mutex);
-    auto                  renderer = resources[contextId].lock();
+    const std::lock_guard lock(getRendererResourcesMutex());
+    auto                  renderer = getRendererResourcesMap()[contextId].lock();
 
     if (!renderer)
     {
-        renderer             = std::make_shared<RendererResources>();
-        resources[contextId] = renderer;
+        renderer = std::make_shared<RendererResources>();
+        getRendererResourcesMap()[contextId] = renderer;
         renderer->registerWithContext(renderer);
     }
 
@@ -630,6 +652,14 @@ std::uint32_t stencilFunctionToGlConstant(sf::StencilComparison comparison)
 
 namespace sf
 {
+namespace priv
+{
+void cleanupRenderTargetContextData(std::uint64_t contextId)
+{
+    RenderTargetImpl::cleanupContextResources(contextId);
+}
+} // namespace priv
+
 ////////////////////////////////////////////////////////////
 void RenderTarget::clear(Color color)
 {

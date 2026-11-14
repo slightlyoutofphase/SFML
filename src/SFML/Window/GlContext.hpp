@@ -41,6 +41,8 @@
 
 namespace sf::priv
 {
+void cleanupRenderTargetContextData(std::uint64_t contextId);
+
 class WindowImpl;
 
 ////////////////////////////////////////////////////////////

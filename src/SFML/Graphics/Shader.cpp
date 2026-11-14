@@ -114,6 +114,52 @@ void main()
 #endif
 }
 
+std::string_view getDefaultFragmentShader()
+{
+#if defined(SFML_OPENGL_ES)
+    static constexpr std::string_view shader = R"(
+#version 100
+precision mediump float;
+uniform sampler2D sfmlTexture;
+uniform int hasTexture;
+varying vec4 vertexColor;
+varying vec2 vertexTexCoords;
+void main()
+{
+    gl_FragColor = vertexColor * (hasTexture != 0 ? texture2D(sfmlTexture, vertexTexCoords) : vec4(1.0));
+}
+)";
+    return shader;
+#else
+    static constexpr std::string_view compatibilityShader = R"(
+#version 110
+uniform sampler2D sfmlTexture;
+uniform int hasTexture;
+varying vec4 vertexColor;
+varying vec2 vertexTexCoords;
+void main()
+{
+    gl_FragColor = vertexColor * (hasTexture != 0 ? texture2D(sfmlTexture, vertexTexCoords) : vec4(1.0));
+}
+)";
+
+    static constexpr std::string_view coreShader = R"(
+#version 140
+uniform sampler2D sfmlTexture;
+uniform int hasTexture;
+in vec4 vertexColor;
+in vec2 vertexTexCoords;
+out vec4 fragmentColor;
+void main()
+{
+    fragmentColor = vertexColor * (hasTexture != 0 ? texture(sfmlTexture, vertexTexCoords) : vec4(1.0));
+}
+)";
+
+    return sf::priv::isCoreProfile() ? coreShader : compatibilityShader;
+#endif
+}
+
 // Retrieve the maximum number of texture units available
 std::size_t getMaxTextureUnits()
 {
@@ -912,6 +958,9 @@ bool Shader::compile(std::string_view vertexShaderCode, std::string_view geometr
 
     if (vertexShaderCode.empty() && !fragmentShaderCode.empty())
         vertexShaderCode = getDefaultVertexShader();
+
+    if (fragmentShaderCode.empty() && (!vertexShaderCode.empty() || !geometryShaderCode.empty()))
+        fragmentShaderCode = getDefaultFragmentShader();
 
     // Make sure we can use geometry shaders
     if (!geometryShaderCode.empty() && !isGeometryAvailable())
