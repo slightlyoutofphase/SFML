@@ -1,15 +1,192 @@
 #include <SFML/Graphics/Image.hpp>
 #include <SFML/Graphics/RectangleShape.hpp>
 #include <SFML/Graphics/RenderTexture.hpp>
+#include <SFML/Graphics/Shader.hpp>
 #include <SFML/Graphics/StencilMode.hpp>
+#include <SFML/Graphics/Texture.hpp>
+
+#include <SFML/Window/Context.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <GraphicsUtil.hpp>
+#include <SFML/OpenGL.hpp>
 #include <WindowUtil.hpp>
+#include <array>
+#include <string_view>
 
 TEST_CASE("[Graphics] Render Tests", runDisplayTests())
 {
+#if !defined(SFML_OPENGL_ES)
+    SECTION("Compatibility rendering leaves fixed-function matrices untouched")
+    {
+        sf::ContextSettings settings;
+        settings.majorVersion = 2;
+        settings.minorVersion = 1;
+
+        sf::RenderTexture renderTexture;
+        if (!renderTexture.resize({32, 32}, settings))
+        {
+            WARN("OpenGL 2.1 compatibility context is unavailable");
+            return;
+        }
+
+        REQUIRE(renderTexture.setActive(true));
+
+        constexpr std::array<GLenum, 3> matrixModes{GL_MODELVIEW, GL_PROJECTION, GL_TEXTURE};
+        constexpr std::array<GLenum, 3> matrixDepths{GL_MODELVIEW_STACK_DEPTH, GL_PROJECTION_STACK_DEPTH, GL_TEXTURE_STACK_DEPTH};
+        std::array<GLint, 3>                   originalStackDepths{};
+        std::array<std::array<GLfloat, 16>, 3> originalMatrices{};
+
+        GLint originalMatrixMode{};
+        glGetIntegerv(GL_MATRIX_MODE, &originalMatrixMode);
+        for (std::size_t i = 0; i < matrixModes.size(); ++i)
+        {
+            glGetIntegerv(matrixDepths[i], &originalStackDepths[i]);
+            glMatrixMode(matrixModes[i]);
+            glGetFloatv(matrixModes[i] == GL_MODELVIEW    ? GL_MODELVIEW_MATRIX
+                        : matrixModes[i] == GL_PROJECTION ? GL_PROJECTION_MATRIX
+                                                          : GL_TEXTURE_MATRIX,
+                        originalMatrices[i].data());
+        }
+        glMatrixMode(static_cast<GLenum>(originalMatrixMode));
+
+        sf::Image   image({2, 2}, sf::Color::White);
+        sf::Texture texture(image);
+        glMatrixMode(GL_TEXTURE);
+        sf::Texture::bind(&texture, sf::CoordinateType::Pixels);
+        GLint matrixModeAfterBind{};
+        glGetIntegerv(GL_MATRIX_MODE, &matrixModeAfterBind);
+        CHECK(matrixModeAfterBind == GL_TEXTURE);
+        glMatrixMode(static_cast<GLenum>(originalMatrixMode));
+
+        GLint textureBinding{};
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &textureBinding);
+        CHECK(textureBinding == static_cast<GLint>(texture.getNativeHandle()));
+
+        sf::RectangleShape shape({32, 32});
+        renderTexture.pushGLStates();
+
+        std::array<GLint, 3> pushedStackDepths{};
+        glGetIntegerv(GL_MODELVIEW_STACK_DEPTH, &pushedStackDepths[0]);
+        glGetIntegerv(GL_PROJECTION_STACK_DEPTH, &pushedStackDepths[1]);
+        glGetIntegerv(GL_TEXTURE_STACK_DEPTH, &pushedStackDepths[2]);
+        CHECK(pushedStackDepths == originalStackDepths);
+
+        renderTexture.draw(shape);
+        renderTexture.popGLStates();
+
+        std::array<GLint, 3>                   finalStackDepths{};
+        std::array<std::array<GLfloat, 16>, 3> finalMatrices{};
+        glGetIntegerv(GL_MATRIX_MODE, &originalMatrixMode);
+        for (std::size_t i = 0; i < matrixModes.size(); ++i)
+        {
+            glGetIntegerv(matrixDepths[i], &finalStackDepths[i]);
+            glMatrixMode(matrixModes[i]);
+            glGetFloatv(matrixModes[i] == GL_MODELVIEW    ? GL_MODELVIEW_MATRIX
+                        : matrixModes[i] == GL_PROJECTION ? GL_PROJECTION_MATRIX
+                                                          : GL_TEXTURE_MATRIX,
+                        finalMatrices[i].data());
+        }
+        glMatrixMode(static_cast<GLenum>(originalMatrixMode));
+
+        CHECK(finalStackDepths == originalStackDepths);
+        CHECK(finalMatrices == originalMatrices);
+    }
+#endif
+
+    SECTION("Core-profile rendering")
+    {
+        sf::Context compatibilityContext;
+        REQUIRE(compatibilityContext.setActive(true));
+        REQUIRE(sf::Shader::isAvailable());
+
+        sf::ContextSettings settings;
+        settings.majorVersion   = 3;
+        settings.minorVersion   = 2;
+        settings.attributeFlags = sf::ContextSettings::Core;
+
+        sf::RenderTexture renderTexture;
+        if (!renderTexture.resize({32, 32}, settings))
+        {
+            WARN("Core-profile OpenGL 3.2 context is unavailable");
+            return;
+        }
+
+        renderTexture.clear(sf::Color::Black);
+
+        sf::RectangleShape shape({32, 32});
+        shape.setFillColor(sf::Color::Green);
+        renderTexture.draw(shape);
+        renderTexture.display();
+
+        CHECK(renderTexture.getTexture().copyToImage().getPixel({16, 16}) == sf::Color::Green);
+
+        sf::Image   image({1, 1}, sf::Color::Blue);
+        sf::Texture texture(image);
+        shape.setFillColor(sf::Color::White);
+        shape.setTexture(&texture);
+
+        renderTexture.clear(sf::Color::Black);
+        renderTexture.draw(shape);
+        renderTexture.display();
+        CHECK(renderTexture.getTexture().copyToImage().getPixel({16, 16}) == sf::Color::Blue);
+
+        const std::string_view vertexShader   = R"(
+#version 150
+in vec2 position;
+in vec4 color;
+in vec2 texCoords;
+out vec2 textureCoordinate;
+void main()
+{
+    gl_Position = vec4(position.x / 16.0 - 1.0, 1.0 - position.y / 16.0, 0.0, 1.0);
+    textureCoordinate = texCoords;
+}
+)";
+        const std::string_view fragmentShader = R"(
+#version 150
+uniform sampler2D image;
+in vec2 textureCoordinate;
+out vec4 fragmentColor;
+void main()
+{
+    fragmentColor = texture(image, textureCoordinate);
+}
+)";
+        sf::Shader             shader(vertexShader, fragmentShader);
+        shader.setUniform("image", texture);
+
+        sf::RenderStates states;
+        states.shader = &shader;
+        renderTexture.clear(sf::Color::Black);
+        renderTexture.draw(shape, states);
+        renderTexture.display();
+
+        CHECK(renderTexture.getTexture().copyToImage().getPixel({16, 16}) == sf::Color::Blue);
+
+        glDisable(GL_BLEND);
+        glEnable(GL_CULL_FACE);
+        glEnable(GL_SCISSOR_TEST);
+        glViewport(2, 3, 8, 9);
+        glScissor(4, 5, 6, 7);
+
+        renderTexture.pushGLStates();
+        renderTexture.draw(shape);
+        renderTexture.popGLStates();
+
+        CHECK(glIsEnabled(GL_BLEND) == GL_FALSE);
+        CHECK(glIsEnabled(GL_CULL_FACE) == GL_TRUE);
+        CHECK(glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE);
+
+        std::array<GLint, 4> viewport{};
+        std::array<GLint, 4> scissorBox{};
+        glGetIntegerv(GL_VIEWPORT, viewport.data());
+        glGetIntegerv(GL_SCISSOR_BOX, scissorBox.data());
+        CHECK((viewport == std::array<GLint, 4>{2, 3, 8, 9}));
+        CHECK((scissorBox == std::array<GLint, 4>{4, 5, 6, 7}));
+    }
+
     SECTION("Stencil Tests")
     {
         sf::RenderTexture renderTexture({100, 100}, sf::ContextSettings{0 /* depthBits */, 8 /* stencilBits */});

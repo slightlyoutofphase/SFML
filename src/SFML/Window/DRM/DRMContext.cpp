@@ -516,6 +516,7 @@ namespace sf::priv
 DRMContext::DRMContext(DRMContext* shared)
 {
     contextCount++;
+    m_settings = ContextSettings{};
     if (initDrm() < 0)
         return;
 
@@ -542,6 +543,7 @@ DRMContext::DRMContext(DRMContext* shared)
 DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, const WindowImpl& owner, unsigned int /*bitsPerPixel*/)
 {
     contextCount++;
+    m_settings = settings;
     if (initDrm() < 0)
         return;
 
@@ -565,6 +567,7 @@ DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, cons
 DRMContext::DRMContext(DRMContext* shared, const ContextSettings& settings, Vector2u /*size*/)
 {
     contextCount++;
+    m_settings = settings;
     if (initDrm() < 0)
         return;
 
@@ -700,7 +703,7 @@ void DRMContext::setVerticalSyncEnabled(bool enabled)
 ////////////////////////////////////////////////////////////
 void DRMContext::createContext(DRMContext* shared)
 {
-    static constexpr std::array contextVersion = {EGL_CONTEXT_CLIENT_VERSION, 1, EGL_NONE};
+    const std::array contextVersion = {EGL_CONTEXT_CLIENT_VERSION, static_cast<EGLint>(m_settings.majorVersion), EGL_NONE};
 
     const EGLContext toShared = shared ? shared->m_context : EGL_NO_CONTEXT;
     if (toShared != EGL_NO_CONTEXT)
@@ -781,7 +784,7 @@ EGLConfig DRMContext::getBestConfig(EGLDisplay display, const ContextSettings& s
       EGL_WINDOW_BIT,
 #if defined(SFML_OPENGL_ES)
       EGL_RENDERABLE_TYPE,
-      EGL_OPENGL_ES_BIT,
+      EGL_OPENGL_ES2_BIT,
 #else
       EGL_RENDERABLE_TYPE,
       EGL_OPENGL_BIT,
@@ -813,8 +816,6 @@ void DRMContext::updateSettings()
     eglCheck(eglGetConfigAttrib(m_display, m_config, EGL_SAMPLES, &tmp));
     m_settings.antiAliasingLevel = static_cast<unsigned int>(tmp);
 
-    m_settings.majorVersion   = 1;
-    m_settings.minorVersion   = 1;
     m_settings.attributeFlags = ContextSettings::Default;
 }
 

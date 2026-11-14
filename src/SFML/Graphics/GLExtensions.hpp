@@ -33,10 +33,8 @@
 
 #ifdef SFML_OPENGL_ES
 
-// SFML requires at a bare minimum OpenGL ES 1.0 capability
+// SFML requires at a bare minimum OpenGL ES 2.0 capability
 // Some extensions only incorporated by 2.0 are also required
-// OpenGL ES 1.0 is defined relative to OpenGL 1.3
-// OpenGL ES 1.1 is defined relative to OpenGL 1.5
 // OpenGL ES 2.0 is defined relative to OpenGL 2.0
 // All functionality beyond that is optional
 // and has to be checked for prior to use
@@ -183,9 +181,128 @@ inline int SF_GL_OES_vertex_buffer_object = 1;
 
 #define GLEXT_EXT_blend_minmax_dependencies SF_GLAD_GL_EXT_blend_minmax, glBlendEquationEXT
 
+#ifdef SFML_OPENGL_ES_2
+
+#undef GLEXT_multitexture
+#undef GLEXT_glClientActiveTexture
+#undef GLEXT_glActiveTexture
+#undef GLEXT_GL_TEXTURE0
+#undef GLEXT_multitexture_dependencies
+#define GLEXT_multitexture              true
+#define GLEXT_glClientActiveTexture     glActiveTexture
+#define GLEXT_glActiveTexture           glActiveTexture
+#define GLEXT_GL_TEXTURE0               GL_TEXTURE0
+#define GLEXT_multitexture_dependencies ::sf::priv::SF_GL_OES_multitexture, glActiveTexture
+
+#undef GLEXT_vertex_buffer_object
+#undef GLEXT_glBindBuffer
+#undef GLEXT_glBufferData
+#undef GLEXT_glBufferSubData
+#undef GLEXT_glDeleteBuffers
+#undef GLEXT_glGenBuffers
+#undef GLEXT_GL_ARRAY_BUFFER
+#undef GLEXT_GL_DYNAMIC_DRAW
+#undef GLEXT_GL_STATIC_DRAW
+#undef GLEXT_GL_STREAM_DRAW
+#undef GLEXT_vertex_buffer_object_dependencies
+#define GLEXT_vertex_buffer_object SF_GLAD_GL_VERSION_2_0
+#define GLEXT_glBindBuffer         glBindBuffer
+#define GLEXT_glBufferData         glBufferData
+#define GLEXT_glBufferSubData      glBufferSubData
+#define GLEXT_glDeleteBuffers      glDeleteBuffers
+#define GLEXT_glGenBuffers         glGenBuffers
+#define GLEXT_GL_ARRAY_BUFFER      GL_ARRAY_BUFFER
+#define GLEXT_GL_DYNAMIC_DRAW      GL_DYNAMIC_DRAW
+#define GLEXT_GL_STATIC_DRAW       GL_STATIC_DRAW
+#define GLEXT_GL_STREAM_DRAW       GL_STREAM_DRAW
+#define GLEXT_vertex_buffer_object_dependencies \
+    ::sf::priv::SF_GL_OES_vertex_buffer_object, glBindBuffer, glBufferData, glBufferSubData, glDeleteBuffers, glGenBuffers
+
+#undef GLEXT_blend_subtract
+#undef GLEXT_glBlendEquation
+#undef GLEXT_GL_FUNC_ADD
+#undef GLEXT_GL_FUNC_SUBTRACT
+#undef GLEXT_GL_FUNC_REVERSE_SUBTRACT
+#undef GLEXT_OES_blend_subtract_dependencies
+#define GLEXT_blend_subtract                  SF_GLAD_GL_VERSION_2_0
+#define GLEXT_glBlendEquation                 glBlendEquation
+#define GLEXT_GL_FUNC_ADD                     GL_FUNC_ADD
+#define GLEXT_GL_FUNC_SUBTRACT                GL_FUNC_SUBTRACT
+#define GLEXT_GL_FUNC_REVERSE_SUBTRACT        GL_FUNC_REVERSE_SUBTRACT
+#define GLEXT_OES_blend_subtract_dependencies SF_GLAD_GL_OES_blend_subtract, glBlendEquation
+
+#undef GLEXT_blend_func_separate
+#undef GLEXT_glBlendFuncSeparate
+#undef GLEXT_blend_func_separate_dependencies
+#define GLEXT_blend_func_separate              SF_GLAD_GL_VERSION_2_0
+#define GLEXT_glBlendFuncSeparate              glBlendFuncSeparate
+#define GLEXT_blend_func_separate_dependencies SF_GLAD_GL_OES_blend_func_separate, glBlendFuncSeparate
+
+#undef GLEXT_blend_equation_separate
+#undef GLEXT_glBlendEquationSeparate
+#undef GLEXT_blend_equation_separate_dependencies
+#define GLEXT_blend_equation_separate              SF_GLAD_GL_VERSION_2_0
+#define GLEXT_glBlendEquationSeparate              glBlendEquationSeparate
+#define GLEXT_blend_equation_separate_dependencies SF_GLAD_GL_OES_blend_equation_separate, glBlendEquationSeparate
+
+#undef GLEXT_framebuffer_object
+#undef GLEXT_glBindRenderbuffer
+#undef GLEXT_glDeleteRenderbuffers
+#undef GLEXT_glGenRenderbuffers
+#undef GLEXT_glRenderbufferStorage
+#undef GLEXT_glBindFramebuffer
+#undef GLEXT_glDeleteFramebuffers
+#undef GLEXT_glGenFramebuffers
+#undef GLEXT_glCheckFramebufferStatus
+#undef GLEXT_glFramebufferTexture2D
+#undef GLEXT_glFramebufferRenderbuffer
+#undef GLEXT_glGenerateMipmap
+#undef GLEXT_GL_FRAMEBUFFER
+#undef GLEXT_GL_RENDERBUFFER
+#undef GLEXT_GL_DEPTH_COMPONENT
+#undef GLEXT_GL_STENCIL_INDEX8
+#undef GLEXT_GL_COLOR_ATTACHMENT0
+#undef GLEXT_GL_DEPTH_ATTACHMENT
+#undef GLEXT_GL_FRAMEBUFFER_COMPLETE
+#undef GLEXT_GL_FRAMEBUFFER_BINDING
+#undef GLEXT_GL_INVALID_FRAMEBUFFER_OPERATION
+#undef GLEXT_GL_STENCIL_ATTACHMENT
+#undef GLEXT_framebuffer_object_dependencies
+#define GLEXT_framebuffer_object               SF_GLAD_GL_VERSION_2_0
+#define GLEXT_glBindRenderbuffer               glBindRenderbuffer
+#define GLEXT_glDeleteRenderbuffers            glDeleteRenderbuffers
+#define GLEXT_glGenRenderbuffers               glGenRenderbuffers
+#define GLEXT_glRenderbufferStorage            glRenderbufferStorage
+#define GLEXT_glBindFramebuffer                glBindFramebuffer
+#define GLEXT_glDeleteFramebuffers             glDeleteFramebuffers
+#define GLEXT_glGenFramebuffers                glGenFramebuffers
+#define GLEXT_glCheckFramebufferStatus         glCheckFramebufferStatus
+#define GLEXT_glFramebufferTexture2D           glFramebufferTexture2D
+#define GLEXT_glFramebufferRenderbuffer        glFramebufferRenderbuffer
+#define GLEXT_glGenerateMipmap                 glGenerateMipmap
+#define GLEXT_GL_FRAMEBUFFER                   GL_FRAMEBUFFER
+#define GLEXT_GL_RENDERBUFFER                  GL_RENDERBUFFER
+#define GLEXT_GL_DEPTH_COMPONENT               GL_DEPTH_COMPONENT16
+#define GLEXT_GL_STENCIL_INDEX8                GL_STENCIL_INDEX8
+#define GLEXT_GL_COLOR_ATTACHMENT0             GL_COLOR_ATTACHMENT0
+#define GLEXT_GL_DEPTH_ATTACHMENT              GL_DEPTH_ATTACHMENT
+#define GLEXT_GL_FRAMEBUFFER_COMPLETE          GL_FRAMEBUFFER_COMPLETE
+#define GLEXT_GL_FRAMEBUFFER_BINDING           GL_FRAMEBUFFER_BINDING
+#define GLEXT_GL_INVALID_FRAMEBUFFER_OPERATION GL_INVALID_FRAMEBUFFER_OPERATION
+#define GLEXT_GL_STENCIL_ATTACHMENT            GL_STENCIL_ATTACHMENT
+#define GLEXT_framebuffer_object_dependencies                                                                        \
+    SF_GLAD_GL_OES_framebuffer_object, glBindRenderbuffer, glDeleteRenderbuffers, glGenRenderbuffers,                \
+        glRenderbufferStorage, glBindFramebuffer, glDeleteFramebuffers, glGenFramebuffers, glCheckFramebufferStatus, \
+        glFramebufferTexture2D, glFramebufferRenderbuffer, glGenerateMipmap
+
+#undef GLEXT_shader_objects_dependencies
+#define GLEXT_shader_objects_dependencies SF_GLAD_GL_VERSION_2_0, glCreateShader, glCreateProgram, glUseProgram
+
+#endif
+
 #else
 
-// SFML requires at a bare minimum OpenGL 1.1 capability
+// SFML requires at a bare minimum OpenGL 2.0 capability
 // All functionality beyond that is optional
 // and has to be checked for prior to use
 
@@ -204,52 +321,52 @@ inline int SF_GL_OES_vertex_buffer_object = 1;
 #define GLEXT_GL_CLAMP_TO_EDGE   GL_CLAMP_TO_EDGE_SGIS
 
 // Core since 1.2 - EXT_blend_minmax
-#define GLEXT_blend_minmax       SF_GLAD_GL_EXT_blend_minmax
-#define GLEXT_glBlendEquation    glBlendEquationEXT
-#define GLEXT_GL_FUNC_ADD        GL_FUNC_ADD_EXT
-#define GLEXT_GL_MIN             GL_MIN_EXT
-#define GLEXT_GL_MAX             GL_MAX_EXT
+#define GLEXT_blend_minmax       (SF_GLAD_GL_VERSION_1_4 || SF_GLAD_GL_EXT_blend_minmax)
+#define GLEXT_glBlendEquation    glBlendEquation
+#define GLEXT_GL_FUNC_ADD        GL_FUNC_ADD
+#define GLEXT_GL_MIN             GL_MIN
+#define GLEXT_GL_MAX             GL_MAX
 
-#define GLEXT_blend_minmax_dependencies SF_GLAD_GL_EXT_blend_minmax, glBlendEquationEXT
+#define GLEXT_blend_minmax_dependencies SF_GLAD_GL_EXT_blend_minmax, glBlendEquation
 
 // Core since 1.2 - EXT_blend_subtract
-#define GLEXT_blend_subtract            SF_GLAD_GL_EXT_blend_subtract
-#define GLEXT_GL_FUNC_SUBTRACT          GL_FUNC_SUBTRACT_EXT
-#define GLEXT_GL_FUNC_REVERSE_SUBTRACT  GL_FUNC_REVERSE_SUBTRACT_EXT
+#define GLEXT_blend_subtract            (SF_GLAD_GL_VERSION_1_4 || SF_GLAD_GL_EXT_blend_subtract)
+#define GLEXT_GL_FUNC_SUBTRACT          GL_FUNC_SUBTRACT
+#define GLEXT_GL_FUNC_REVERSE_SUBTRACT  GL_FUNC_REVERSE_SUBTRACT
 
 // Core since 1.3 - ARB_multitexture
-#define GLEXT_multitexture              SF_GLAD_GL_ARB_multitexture
-#define GLEXT_glClientActiveTexture     glClientActiveTextureARB
-#define GLEXT_glActiveTexture           glActiveTextureARB
+#define GLEXT_multitexture              (SF_GLAD_GL_VERSION_1_3 || SF_GLAD_GL_ARB_multitexture)
+#define GLEXT_glClientActiveTexture     glClientActiveTexture
+#define GLEXT_glActiveTexture           glActiveTexture
 #define GLEXT_GL_TEXTURE0               GL_TEXTURE0_ARB
 
-#define GLEXT_multitexture_dependencies SF_GLAD_GL_ARB_multitexture, glClientActiveTextureARB, glActiveTextureARB
+#define GLEXT_multitexture_dependencies SF_GLAD_GL_ARB_multitexture, glClientActiveTexture, glActiveTexture
 
 // Core since 1.4 - EXT_blend_func_separate
-#define GLEXT_blend_func_separate       SF_GLAD_GL_EXT_blend_func_separate
-#define GLEXT_glBlendFuncSeparate       glBlendFuncSeparateEXT
+#define GLEXT_blend_func_separate       (SF_GLAD_GL_VERSION_1_4 || SF_GLAD_GL_EXT_blend_func_separate)
+#define GLEXT_glBlendFuncSeparate       glBlendFuncSeparate
 
-#define GLEXT_blend_func_separate_dependencies SF_GLAD_GL_EXT_blend_func_separate, glBlendFuncSeparateEXT
+#define GLEXT_blend_func_separate_dependencies SF_GLAD_GL_EXT_blend_func_separate, glBlendFuncSeparate
 
 // Core since 1.5 - ARB_vertex_buffer_object
-#define GLEXT_vertex_buffer_object             SF_GLAD_GL_ARB_vertex_buffer_object
+#define GLEXT_vertex_buffer_object             (SF_GLAD_GL_VERSION_1_5 || SF_GLAD_GL_ARB_vertex_buffer_object)
 #define GLEXT_GL_ARRAY_BUFFER                  GL_ARRAY_BUFFER_ARB
 #define GLEXT_GL_DYNAMIC_DRAW                  GL_DYNAMIC_DRAW_ARB
 #define GLEXT_GL_READ_ONLY                     GL_READ_ONLY_ARB
 #define GLEXT_GL_STATIC_DRAW                   GL_STATIC_DRAW_ARB
 #define GLEXT_GL_STREAM_DRAW                   GL_STREAM_DRAW_ARB
 #define GLEXT_GL_WRITE_ONLY                    GL_WRITE_ONLY_ARB
-#define GLEXT_glBindBuffer                     glBindBufferARB
-#define GLEXT_glBufferData                     glBufferDataARB
-#define GLEXT_glBufferSubData                  glBufferSubDataARB
-#define GLEXT_glDeleteBuffers                  glDeleteBuffersARB
-#define GLEXT_glGenBuffers                     glGenBuffersARB
+#define GLEXT_glBindBuffer                     glBindBuffer
+#define GLEXT_glBufferData                     glBufferData
+#define GLEXT_glBufferSubData                  glBufferSubData
+#define GLEXT_glDeleteBuffers                  glDeleteBuffers
+#define GLEXT_glGenBuffers                     glGenBuffers
 #define GLEXT_glMapBuffer                      glMapBufferARB
 #define GLEXT_glUnmapBuffer                    glUnmapBufferARB
 
-#define GLEXT_vertex_buffer_object_dependencies                                                                    \
-    SF_GLAD_GL_ARB_vertex_buffer_object, glBindBufferARB, glBufferDataARB, glBufferSubDataARB, glDeleteBuffersARB, \
-        glGenBuffersARB, glMapBufferARB, glUnmapBufferARB
+#define GLEXT_vertex_buffer_object_dependencies                                                                      \
+    SF_GLAD_GL_ARB_vertex_buffer_object, glBindBuffer, glBufferData, glBufferSubData, glDeleteBuffers, glGenBuffers, \
+        glMapBufferARB, glUnmapBufferARB
 
 // Core since 2.0 - ARB_shading_language_100
 #define GLEXT_shading_language_100     SF_GLAD_GL_ARB_shading_language_100
@@ -308,10 +425,10 @@ inline int SF_GL_OES_vertex_buffer_object = 1;
 #define GLEXT_texture_non_power_of_two            SF_GLAD_GL_ARB_texture_non_power_of_two
 
 // Core since 2.0 - EXT_blend_equation_separate
-#define GLEXT_blend_equation_separate             SF_GLAD_GL_EXT_blend_equation_separate
-#define GLEXT_glBlendEquationSeparate             glBlendEquationSeparateEXT
+#define GLEXT_blend_equation_separate             (SF_GLAD_GL_VERSION_2_0 || SF_GLAD_GL_EXT_blend_equation_separate)
+#define GLEXT_glBlendEquationSeparate             glBlendEquationSeparate
 
-#define GLEXT_blend_equation_separate_dependencies SF_GLAD_GL_EXT_blend_equation_separate, glBlendEquationSeparateEXT
+#define GLEXT_blend_equation_separate_dependencies SF_GLAD_GL_EXT_blend_equation_separate, glBlendEquationSeparate
 
 // Core since 2.1 - EXT_texture_sRGB
 #define GLEXT_texture_sRGB                         SF_GLAD_GL_EXT_texture_sRGB
@@ -321,18 +438,18 @@ inline int SF_GL_OES_vertex_buffer_object = 1;
 #define GLEXT_framebuffer_sRGB                     SF_GLAD_GL_ARB_framebuffer_sRGB
 
 // Core since 3.0 - EXT_framebuffer_object
-#define GLEXT_framebuffer_object                   SF_GLAD_GL_EXT_framebuffer_object
+#define GLEXT_framebuffer_object                   (SF_GLAD_GL_VERSION_3_0 || SF_GLAD_GL_EXT_framebuffer_object)
 #define GLEXT_glBindRenderbuffer                   glBindRenderbufferEXT
 #define GLEXT_glDeleteRenderbuffers                glDeleteRenderbuffersEXT
 #define GLEXT_glGenRenderbuffers                   glGenRenderbuffersEXT
 #define GLEXT_glRenderbufferStorage                glRenderbufferStorageEXT
-#define GLEXT_glBindFramebuffer                    glBindFramebufferEXT
-#define GLEXT_glDeleteFramebuffers                 glDeleteFramebuffersEXT
-#define GLEXT_glGenFramebuffers                    glGenFramebuffersEXT
-#define GLEXT_glCheckFramebufferStatus             glCheckFramebufferStatusEXT
-#define GLEXT_glFramebufferTexture2D               glFramebufferTexture2DEXT
-#define GLEXT_glFramebufferRenderbuffer            glFramebufferRenderbufferEXT
-#define GLEXT_glGenerateMipmap                     glGenerateMipmapEXT
+#define GLEXT_glBindFramebuffer                    glBindFramebuffer
+#define GLEXT_glDeleteFramebuffers                 glDeleteFramebuffers
+#define GLEXT_glGenFramebuffers                    glGenFramebuffers
+#define GLEXT_glCheckFramebufferStatus             glCheckFramebufferStatus
+#define GLEXT_glFramebufferTexture2D               glFramebufferTexture2D
+#define GLEXT_glFramebufferRenderbuffer            glFramebufferRenderbuffer
+#define GLEXT_glGenerateMipmap                     glGenerateMipmap
 #define GLEXT_GL_FRAMEBUFFER                       GL_FRAMEBUFFER_EXT
 #define GLEXT_GL_RENDERBUFFER                      GL_RENDERBUFFER_EXT
 #define GLEXT_GL_STENCIL_INDEX8                    GL_STENCIL_INDEX8_EXT
@@ -343,10 +460,10 @@ inline int SF_GL_OES_vertex_buffer_object = 1;
 #define GLEXT_GL_INVALID_FRAMEBUFFER_OPERATION     GL_INVALID_FRAMEBUFFER_OPERATION_EXT
 #define GLEXT_GL_STENCIL_ATTACHMENT                GL_STENCIL_ATTACHMENT_EXT
 
-#define GLEXT_framebuffer_object_dependencies                                                                  \
-    SF_GLAD_GL_EXT_framebuffer_object, glBindRenderbufferEXT, glDeleteRenderbuffersEXT, glGenRenderbuffersEXT, \
-        glRenderbufferStorageEXT, glBindFramebufferEXT, glDeleteFramebuffersEXT, glGenFramebuffersEXT,         \
-        glCheckFramebufferStatusEXT, glFramebufferTexture2DEXT, glFramebufferRenderbufferEXT, glGenerateMipmapEXT
+#define GLEXT_framebuffer_object_dependencies                                                                        \
+    SF_GLAD_GL_EXT_framebuffer_object, glBindRenderbuffer, glDeleteRenderbuffers, glGenRenderbuffers,                \
+        glRenderbufferStorage, glBindFramebuffer, glDeleteFramebuffers, glGenFramebuffers, glCheckFramebufferStatus, \
+        glFramebufferTexture2D, glFramebufferRenderbuffer, glGenerateMipmap
 
 // Core since 3.0 - EXT_packed_depth_stencil
 #define GLEXT_packed_depth_stencil        SF_GLAD_GL_EXT_packed_depth_stencil
@@ -413,5 +530,11 @@ namespace sf::priv
 ///
 ////////////////////////////////////////////////////////////
 void ensureExtensionsInit();
+
+////////////////////////////////////////////////////////////
+/// \brief Check whether the current context uses the core profile
+///
+////////////////////////////////////////////////////////////
+[[nodiscard]] bool isCoreProfile();
 
 } // namespace sf::priv

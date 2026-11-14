@@ -99,10 +99,10 @@ EaglContext::EaglContext(EaglContext* shared) : m_context(nil)
 
     // Create the context
     if (shared)
-        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1
+        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2
                                           sharegroup:[shared->m_context sharegroup]];
     else
-        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1];
+        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
 }
 
 
@@ -291,12 +291,12 @@ void EaglContext::createContext(EaglContext*           shared,
     {
         [EAGLContext setCurrentContext:nil];
 
-        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1
+        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2
                                           sharegroup:[shared->m_context sharegroup]];
     }
     else
     {
-        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1];
+        m_context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
     }
 
     // Activate it

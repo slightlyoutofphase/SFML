@@ -3,14 +3,14 @@
 ////////////////////////////////////////////////////////////
 #include <SFML/Window.hpp>
 
-#include <X11/Xlib.h>
-#define GLAD_GL_IMPLEMENTATION
-#include <gl.h>
+#include <SFML/System/Angle.hpp>
 
+#include <X11/Xlib.h>
+
+#include <OpenGLRenderer.hpp>
 #include <array>
 #include <iostream>
 
-#include <cmath>
 #include <cstdlib>
 
 ////////////////////////////////////////////////////////////
@@ -45,20 +45,7 @@
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
 
-    // Setup a perspective projection
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    const float extent = std::tan(sf::degrees(45).asRadians());
-
-#ifdef SFML_OPENGL_ES
-    glFrustumf(-extent, extent, -extent, extent, 1.0f, 500.0f);
-#else
-    glFrustum(-extent, extent, -extent, extent, 1.0f, 500.0f);
-#endif
-
-    // Enable position and texture coordinates vertex components
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glEnableClientState(GL_COLOR_ARRAY);
+    glViewport(0, 0, static_cast<GLsizei>(window.getSize().x), static_cast<GLsizei>(window.getSize().y));
 
     return true;
 }
@@ -73,7 +60,7 @@
 /// \return True if operation was successful, false otherwise
 ///
 ////////////////////////////////////////////////////////////
-[[nodiscard]] bool draw(sf::Window& window, float elapsedTime)
+[[nodiscard]] bool draw(sf::Window& window, OpenGLRenderer& renderer, float elapsedTime)
 {
     // Activate the window
     if (!window.setActive())
@@ -85,17 +72,9 @@
     // Clear color and depth buffers
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Apply some transformations
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    glTranslatef(0.f, 0.f, -200.f);
-    glRotatef(elapsedTime * 10.f, 1.f, 0.f, 0.f);
-    glRotatef(elapsedTime * 6.f, 0.f, 1.f, 0.f);
-    glRotatef(elapsedTime * 18.f, 0.f, 0.f, 1.f);
-
     // Define a 3D cube (6 faces made of 2 triangles composed by 3 vertices)
     // clang-format off
-    constexpr std::array<GLfloat, 216> cube =
+    static constexpr std::array<GLfloat, 216> cube =
     {
         // positions    // colors
         -50, -50, -50,  1, 1, 0,
@@ -142,10 +121,18 @@
     };
     // clang-format on
 
-    // Draw the cube
-    glVertexPointer(3, GL_FLOAT, 6 * sizeof(GLfloat), cube.data());
-    glColorPointer(3, GL_FLOAT, 6 * sizeof(GLfloat), cube.data() + 3);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
+    if (!renderer.isCreated() && !renderer.create(cube.data(), 36, static_cast<GLsizei>(6 * sizeof(GLfloat)), 3, false))
+    {
+        std::cerr << "Failed to initialize the OpenGL renderer" << std::endl;
+        return false;
+    }
+
+    renderer.draw(window.getSize(),
+                  {0.f, 0.f, -200.f},
+                  {sf::degrees(elapsedTime * 10.f).asRadians(),
+                   sf::degrees(elapsedTime * 6.f).asRadians(),
+                   sf::degrees(elapsedTime * 18.f).asRadians()},
+                  false);
 
     return true;
 }
@@ -172,17 +159,17 @@ int main()
     attributes.background_pixel = BlackPixel(display, screen);
     attributes.event_mask       = KeyPressMask;
     const Window window         = XCreateWindow(display,
-                                        RootWindow(display, screen),
-                                        0,
-                                        0,
-                                        650,
-                                        330,
-                                        0,
-                                        DefaultDepth(display, screen),
-                                        InputOutput,
-                                        DefaultVisual(display, screen),
-                                        CWBackPixel | CWEventMask,
-                                        &attributes);
+                                                RootWindow(display, screen),
+                                                0,
+                                                0,
+                                                650,
+                                                330,
+                                                0,
+                                                DefaultDepth(display, screen),
+                                                InputOutput,
+                                                DefaultVisual(display, screen),
+                                                CWBackPixel | CWEventMask,
+                                                &attributes);
     if (!window)
         return EXIT_FAILURE;
 
@@ -226,18 +213,21 @@ int main()
     // Create a clock for measuring elapsed time
     const sf::Clock clock;
 
-    // Load OpenGL or OpenGL ES entry points using glad
+    // Load OpenGL entry points for the current context
     if (!sfmlView1.setActive())
     {
         std::cerr << "Failed to set view 1 as active" << std::endl;
         return EXIT_FAILURE;
     }
 
-#ifdef SFML_OPENGL_ES
-    gladLoadGLES1(sf::Context::getFunction);
-#else
-    gladLoadGL(sf::Context::getFunction);
-#endif
+    if (!loadOpenGLFunctions())
+    {
+        std::cerr << "Failed to load OpenGL functions" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    OpenGLRenderer renderer1;
+    OpenGLRenderer renderer2;
 
     // Initialize our views
     if (!initialize(sfmlView1))
@@ -273,13 +263,13 @@ int main()
         }
 
         // Draw something into our views
-        if (!draw(sfmlView1, clock.getElapsedTime().asSeconds()))
+        if (!draw(sfmlView1, renderer1, clock.getElapsedTime().asSeconds()))
         {
             std::cerr << "Failed to draw on view 1" << std::endl;
             return EXIT_FAILURE;
         }
 
-        if (!draw(sfmlView2, clock.getElapsedTime().asSeconds() * 0.3f))
+        if (!draw(sfmlView2, renderer2, clock.getElapsedTime().asSeconds() * 0.3f))
         {
             std::cerr << "Failed to draw on view 2" << std::endl;
             return EXIT_FAILURE;

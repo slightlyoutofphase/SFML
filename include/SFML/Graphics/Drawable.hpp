@@ -103,10 +103,8 @@ protected:
 ///         states.texture = &m_texture;
 ///         target.draw(m_vertices, states);
 ///
-///         // ... or draw with OpenGL directly
-///         glBegin(GL_TRIANGLES);
-///         ...
-///         glEnd();
+///         // ... or draw with OpenGL directly using a shader and vertex buffers
+///         drawOpenGLGeometry();
 ///     }
 ///
 ///     sf::Sprite m_sprite;

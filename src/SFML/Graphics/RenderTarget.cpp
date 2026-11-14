@@ -28,6 +28,7 @@
 #include <SFML/Graphics/Drawable.hpp>
 #include <SFML/Graphics/GLCheck.hpp>
 #include <SFML/Graphics/GLExtensions.hpp>
+#include <SFML/Graphics/Glsl.hpp>
 #include <SFML/Graphics/RenderTarget.hpp>
 #include <SFML/Graphics/Shader.hpp>
 #include <SFML/Graphics/Texture.hpp>
@@ -39,9 +40,13 @@
 #include <SFML/System/Err.hpp>
 
 #include <algorithm>
+#include <array>
+#include <memory>
 #include <mutex>
 #include <ostream>
+#include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include <cassert>
 #include <cmath>
@@ -53,6 +58,415 @@ namespace
 // A nested named namespace is used here to allow unity builds of SFML.
 namespace RenderTargetImpl
 {
+struct RendererResources
+{
+    sf::Shader               shader;
+    sf::VertexBuffer         vertexBuffer{sf::VertexBuffer::Usage::Stream};
+    PFNGLGENVERTEXARRAYSPROC genVertexArrays{};
+    PFNGLBINDVERTEXARRAYPROC bindVertexArray{};
+    GLuint                   vertexArray{};
+    bool                     coreProfile{};
+    bool                     initialized{};
+};
+
+struct VertexAttributeState
+{
+    GLint enabled{};
+    GLint size{};
+    GLint type{};
+    GLint normalized{};
+    GLint stride{};
+    GLint buffer{};
+    void* pointer{};
+};
+
+struct GLStateSnapshot
+{
+    GLint                               activeTexture{};
+    GLint                               program{};
+    GLint                               arrayBuffer{};
+    GLint                               vertexArray{};
+    PFNGLBINDVERTEXARRAYPROC            bindVertexArray{};
+    std::vector<GLint>                  textures;
+    std::array<GLint, 4>                viewport{};
+    std::array<GLint, 4>                scissorBox{};
+    std::array<GLboolean, 4>            colorMask{};
+    std::array<GLint, 2>                blendFactors{};
+    std::array<GLint, 2>                blendFactorsAlpha{};
+    std::array<GLint, 2>                blendEquations{};
+    std::array<GLint, 2>                stencilFunctions{};
+    std::array<GLint, 2>                stencilReferences{};
+    std::array<GLint, 2>                stencilValueMasks{};
+    std::array<GLint, 2>                stencilWriteMasks{};
+    std::array<std::array<GLint, 3>, 2> stencilOperations{};
+    std::array<VertexAttributeState, 5> vertexAttributes{};
+    bool                                blendEnabled{};
+    bool                                cullEnabled{};
+    bool                                depthEnabled{};
+    bool                                stencilEnabled{};
+    bool                                scissorEnabled{};
+    bool                                framebufferSrgbEnabled{};
+    bool                                coreProfile{};
+};
+
+using GLStateSnapshotStackMap = std::unordered_map<std::uint64_t, std::vector<GLStateSnapshot>>;
+
+GLStateSnapshotStackMap& getGLStateSnapshotStacks()
+{
+    static GLStateSnapshotStackMap stacks;
+    return stacks;
+}
+
+std::mutex& getGLStateSnapshotMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+bool isCoreProfile()
+{
+    return sf::priv::isCoreProfile();
+}
+
+RendererResources& getRendererResources()
+{
+    static std::mutex                                           mutex;
+    static std::unordered_map<std::uint64_t, RendererResources> resources;
+
+    const std::uint64_t   contextId = sf::Context::getActiveContextId();
+    const std::lock_guard lock(mutex);
+    auto&                 renderer = resources[contextId];
+
+    if (!renderer.initialized)
+    {
+        sf::priv::ensureExtensionsInit();
+        renderer.coreProfile = isCoreProfile();
+
+#ifndef SFML_OPENGL_ES
+        if (renderer.coreProfile)
+        {
+            renderer.genVertexArrays = reinterpret_cast<PFNGLGENVERTEXARRAYSPROC>(
+                sf::Context::getFunction("glGenVertexArrays"));
+            renderer.bindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYPROC>(
+                sf::Context::getFunction("glBindVertexArray"));
+
+            if (!renderer.genVertexArrays || !renderer.bindVertexArray)
+            {
+                sf::err() << "Failed to initialize OpenGL core-profile vertex array entry points" << std::endl;
+                renderer.initialized = true;
+                return renderer;
+            }
+        }
+#endif
+
+#if defined(SFML_OPENGL_ES)
+        static constexpr std::string_view vertexShader = R"(
+#version 100
+attribute vec2 position;
+attribute vec4 color;
+attribute vec2 texCoords;
+uniform mat4 matrix;
+uniform vec4 textureTransform;
+varying vec4 vertexColor;
+varying vec2 vertexTexCoords;
+void main()
+{
+    gl_Position = matrix * vec4(position, 0.0, 1.0);
+    vertexColor = color;
+    vertexTexCoords = texCoords * textureTransform.xy + textureTransform.zw;
+}
+)";
+
+        static constexpr std::string_view fragmentShader = R"(
+#version 100
+precision mediump float;
+uniform sampler2D sfmlTexture;
+uniform int hasTexture;
+varying vec4 vertexColor;
+varying vec2 vertexTexCoords;
+void main()
+{
+    gl_FragColor = vertexColor * (hasTexture != 0 ? texture2D(sfmlTexture, vertexTexCoords) : vec4(1.0));
+}
+)";
+#else
+        static constexpr std::string_view compatibilityVertexShader = R"(
+#version 110
+attribute vec2 position;
+attribute vec4 color;
+attribute vec2 texCoords;
+uniform mat4 matrix;
+uniform vec4 textureTransform;
+varying vec4 vertexColor;
+varying vec2 vertexTexCoords;
+void main()
+{
+    gl_Position = matrix * vec4(position, 0.0, 1.0);
+    vertexColor = color;
+    vertexTexCoords = texCoords * textureTransform.xy + textureTransform.zw;
+}
+)";
+
+        static constexpr std::string_view compatibilityFragmentShader = R"(
+#version 110
+uniform sampler2D sfmlTexture;
+uniform int hasTexture;
+varying vec4 vertexColor;
+varying vec2 vertexTexCoords;
+void main()
+{
+    gl_FragColor = vertexColor * (hasTexture != 0 ? texture2D(sfmlTexture, vertexTexCoords) : vec4(1.0));
+}
+)";
+
+        static constexpr std::string_view coreVertexShader = R"(
+#version 140
+in vec2 position;
+in vec4 color;
+in vec2 texCoords;
+uniform mat4 matrix;
+uniform vec4 textureTransform;
+out vec4 vertexColor;
+out vec2 vertexTexCoords;
+void main()
+{
+    gl_Position = matrix * vec4(position, 0.0, 1.0);
+    vertexColor = color;
+    vertexTexCoords = texCoords * textureTransform.xy + textureTransform.zw;
+}
+)";
+
+        static constexpr std::string_view coreFragmentShader = R"(
+#version 140
+uniform sampler2D sfmlTexture;
+uniform int hasTexture;
+in vec4 vertexColor;
+in vec2 vertexTexCoords;
+out vec4 fragmentColor;
+void main()
+{
+    fragmentColor = vertexColor * (hasTexture != 0 ? texture(sfmlTexture, vertexTexCoords) : vec4(1.0));
+}
+)";
+
+        const std::string_view vertexShader   = renderer.coreProfile ? coreVertexShader : compatibilityVertexShader;
+        const std::string_view fragmentShader = renderer.coreProfile ? coreFragmentShader : compatibilityFragmentShader;
+#endif
+
+        const bool shaderLoaded = renderer.shader.loadFromMemory(vertexShader, fragmentShader);
+
+        if (!shaderLoaded)
+        {
+            sf::err() << "Failed to initialize SFML's internal renderer shader" << std::endl;
+            renderer.initialized = true;
+            return renderer;
+        }
+
+        if (!renderer.vertexBuffer.create(4))
+        {
+            sf::err() << "Failed to initialize SFML's internal renderer vertex buffer" << std::endl;
+            renderer.initialized = true;
+            return renderer;
+        }
+
+        renderer.shader.setUniform("sfmlTexture", sf::Shader::CurrentTexture);
+        renderer.initialized = true;
+    }
+
+    return renderer;
+}
+
+void pushGLStateSnapshot()
+{
+    GLStateSnapshot snapshot;
+
+    snapshot.coreProfile = isCoreProfile();
+    glCheck(glGetIntegerv(GL_ACTIVE_TEXTURE, &snapshot.activeTexture));
+
+    GLint textureUnitCount = 1;
+    glCheck(glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &textureUnitCount));
+    snapshot.textures.resize(static_cast<std::size_t>(std::max(textureUnitCount, 1)));
+    for (std::size_t i = 0; i < snapshot.textures.size(); ++i)
+    {
+        glCheck(glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(i)));
+        glCheck(glGetIntegerv(GL_TEXTURE_BINDING_2D, &snapshot.textures[i]));
+    }
+
+    glCheck(glActiveTexture(static_cast<GLenum>(snapshot.activeTexture)));
+    glCheck(glGetIntegerv(GL_CURRENT_PROGRAM, &snapshot.program));
+    glCheck(glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &snapshot.arrayBuffer));
+    glCheck(glGetIntegerv(GL_VIEWPORT, snapshot.viewport.data()));
+    glCheck(glGetIntegerv(GL_SCISSOR_BOX, snapshot.scissorBox.data()));
+    glCheck(glGetBooleanv(GL_COLOR_WRITEMASK, snapshot.colorMask.data()));
+
+    snapshot.blendEnabled   = glIsEnabled(GL_BLEND) == GL_TRUE;
+    snapshot.cullEnabled    = glIsEnabled(GL_CULL_FACE) == GL_TRUE;
+    snapshot.depthEnabled   = glIsEnabled(GL_DEPTH_TEST) == GL_TRUE;
+    snapshot.stencilEnabled = glIsEnabled(GL_STENCIL_TEST) == GL_TRUE;
+    snapshot.scissorEnabled = glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE;
+
+    glCheck(glGetIntegerv(GL_BLEND_SRC_RGB, &snapshot.blendFactors[0]));
+    glCheck(glGetIntegerv(GL_BLEND_DST_RGB, &snapshot.blendFactors[1]));
+    glCheck(glGetIntegerv(GL_BLEND_SRC_ALPHA, &snapshot.blendFactorsAlpha[0]));
+    glCheck(glGetIntegerv(GL_BLEND_DST_ALPHA, &snapshot.blendFactorsAlpha[1]));
+    glCheck(glGetIntegerv(GL_BLEND_EQUATION_RGB, &snapshot.blendEquations[0]));
+    glCheck(glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &snapshot.blendEquations[1]));
+
+    constexpr std::array<GLenum, 2>                stencilFunctions{GL_STENCIL_FUNC, GL_STENCIL_BACK_FUNC};
+    constexpr std::array<GLenum, 2>                stencilReferences{GL_STENCIL_REF, GL_STENCIL_BACK_REF};
+    constexpr std::array<GLenum, 2>                stencilValueMasks{GL_STENCIL_VALUE_MASK, GL_STENCIL_BACK_VALUE_MASK};
+    constexpr std::array<GLenum, 2>                stencilWriteMasks{GL_STENCIL_WRITEMASK, GL_STENCIL_BACK_WRITEMASK};
+    constexpr std::array<std::array<GLenum, 3>, 2> stencilOperations{
+        {{GL_STENCIL_FAIL, GL_STENCIL_PASS_DEPTH_FAIL, GL_STENCIL_PASS_DEPTH_PASS},
+         {GL_STENCIL_BACK_FAIL, GL_STENCIL_BACK_PASS_DEPTH_FAIL, GL_STENCIL_BACK_PASS_DEPTH_PASS}}};
+
+    for (std::size_t face = 0; face < stencilFunctions.size(); ++face)
+    {
+        glCheck(glGetIntegerv(stencilFunctions[face], &snapshot.stencilFunctions[face]));
+        glCheck(glGetIntegerv(stencilReferences[face], &snapshot.stencilReferences[face]));
+        glCheck(glGetIntegerv(stencilValueMasks[face], &snapshot.stencilValueMasks[face]));
+        glCheck(glGetIntegerv(stencilWriteMasks[face], &snapshot.stencilWriteMasks[face]));
+
+        for (std::size_t operation = 0; operation < stencilOperations[face].size(); ++operation)
+            glCheck(glGetIntegerv(stencilOperations[face][operation], &snapshot.stencilOperations[face][operation]));
+    }
+
+#ifndef SFML_OPENGL_ES
+    snapshot.framebufferSrgbEnabled = GLEXT_framebuffer_sRGB && glIsEnabled(GL_FRAMEBUFFER_SRGB) == GL_TRUE;
+
+    if (snapshot.coreProfile)
+    {
+        snapshot.bindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYPROC>(
+            sf::Context::getFunction("glBindVertexArray"));
+        glCheck(glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &snapshot.vertexArray));
+    }
+#endif
+
+    if (!snapshot.coreProfile)
+    {
+#if defined(SFML_OPENGL_ES)
+        constexpr std::array<GLuint, 3> attributeIndices{0, 1, 2};
+#else
+        constexpr std::array<GLuint, 5> attributeIndices{0, 1, 2, 3, 8};
+#endif
+
+        for (std::size_t i = 0; i < attributeIndices.size(); ++i)
+        {
+            auto& attribute = snapshot.vertexAttributes[i];
+            glCheck(glGetVertexAttribiv(attributeIndices[i], GL_VERTEX_ATTRIB_ARRAY_ENABLED, &attribute.enabled));
+            glCheck(glGetVertexAttribiv(attributeIndices[i], GL_VERTEX_ATTRIB_ARRAY_SIZE, &attribute.size));
+            glCheck(glGetVertexAttribiv(attributeIndices[i], GL_VERTEX_ATTRIB_ARRAY_TYPE, &attribute.type));
+            glCheck(glGetVertexAttribiv(attributeIndices[i], GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &attribute.normalized));
+            glCheck(glGetVertexAttribiv(attributeIndices[i], GL_VERTEX_ATTRIB_ARRAY_STRIDE, &attribute.stride));
+            glCheck(glGetVertexAttribiv(attributeIndices[i], GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &attribute.buffer));
+            glCheck(glGetVertexAttribPointerv(attributeIndices[i], GL_VERTEX_ATTRIB_ARRAY_POINTER, &attribute.pointer));
+        }
+    }
+
+    const std::lock_guard lock(getGLStateSnapshotMutex());
+    getGLStateSnapshotStacks()[sf::Context::getActiveContextId()].push_back(snapshot);
+}
+
+bool popGLStateSnapshot()
+{
+    GLStateSnapshot snapshot;
+    {
+        const std::lock_guard lock(getGLStateSnapshotMutex());
+        auto&                 stack = getGLStateSnapshotStacks()[sf::Context::getActiveContextId()];
+
+        if (stack.empty())
+            return false;
+
+        snapshot = stack.back();
+        stack.pop_back();
+    }
+
+    if (snapshot.coreProfile && snapshot.bindVertexArray)
+        glCheck(snapshot.bindVertexArray(static_cast<GLuint>(snapshot.vertexArray)));
+
+    glCheck(glUseProgram(static_cast<GLuint>(snapshot.program)));
+    for (std::size_t i = 0; i < snapshot.textures.size(); ++i)
+    {
+        glCheck(glActiveTexture(GL_TEXTURE0 + static_cast<GLenum>(i)));
+        glCheck(glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(snapshot.textures[i])));
+    }
+
+    glCheck(glActiveTexture(static_cast<GLenum>(snapshot.activeTexture)));
+    glCheck(glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(snapshot.arrayBuffer)));
+
+    if (!snapshot.coreProfile)
+    {
+#if defined(SFML_OPENGL_ES)
+        constexpr std::array<GLuint, 3> attributeIndices{0, 1, 2};
+#else
+        constexpr std::array<GLuint, 5> attributeIndices{0, 1, 2, 3, 8};
+#endif
+
+        for (std::size_t i = 0; i < attributeIndices.size(); ++i)
+        {
+            const auto& attribute = snapshot.vertexAttributes[i];
+            glCheck(glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(attribute.buffer)));
+            glCheck(glVertexAttribPointer(attributeIndices[i],
+                                          attribute.size,
+                                          static_cast<GLenum>(attribute.type),
+                                          static_cast<GLboolean>(attribute.normalized),
+                                          attribute.stride,
+                                          attribute.pointer));
+            if (attribute.enabled)
+                glCheck(glEnableVertexAttribArray(attributeIndices[i]));
+            else
+                glCheck(glDisableVertexAttribArray(attributeIndices[i]));
+        }
+
+        glCheck(glBindBuffer(GL_ARRAY_BUFFER, static_cast<GLuint>(snapshot.arrayBuffer)));
+    }
+
+    glCheck(glViewport(snapshot.viewport[0], snapshot.viewport[1], snapshot.viewport[2], snapshot.viewport[3]));
+    glCheck(glScissor(snapshot.scissorBox[0], snapshot.scissorBox[1], snapshot.scissorBox[2], snapshot.scissorBox[3]));
+    glCheck(glColorMask(snapshot.colorMask[0], snapshot.colorMask[1], snapshot.colorMask[2], snapshot.colorMask[3]));
+    glCheck(glBlendFuncSeparate(static_cast<GLenum>(snapshot.blendFactors[0]),
+                                static_cast<GLenum>(snapshot.blendFactors[1]),
+                                static_cast<GLenum>(snapshot.blendFactorsAlpha[0]),
+                                static_cast<GLenum>(snapshot.blendFactorsAlpha[1])));
+    glCheck(glBlendEquationSeparate(static_cast<GLenum>(snapshot.blendEquations[0]),
+                                    static_cast<GLenum>(snapshot.blendEquations[1])));
+
+    for (std::size_t face = 0; face < 2; ++face)
+    {
+        const GLenum faceEnum = face == 0 ? GL_FRONT : GL_BACK;
+        glCheck(glStencilFuncSeparate(faceEnum,
+                                      static_cast<GLenum>(snapshot.stencilFunctions[face]),
+                                      snapshot.stencilReferences[face],
+                                      static_cast<GLuint>(snapshot.stencilValueMasks[face])));
+        glCheck(glStencilMaskSeparate(faceEnum, static_cast<GLuint>(snapshot.stencilWriteMasks[face])));
+        glCheck(glStencilOpSeparate(faceEnum,
+                                    static_cast<GLenum>(snapshot.stencilOperations[face][0]),
+                                    static_cast<GLenum>(snapshot.stencilOperations[face][1]),
+                                    static_cast<GLenum>(snapshot.stencilOperations[face][2])));
+    }
+
+    const auto setEnabled = [](GLenum capability, bool enabled)
+    {
+        if (enabled)
+            glCheck(glEnable(capability));
+        else
+            glCheck(glDisable(capability));
+    };
+
+    setEnabled(GL_BLEND, snapshot.blendEnabled);
+    setEnabled(GL_CULL_FACE, snapshot.cullEnabled);
+    setEnabled(GL_DEPTH_TEST, snapshot.depthEnabled);
+    setEnabled(GL_STENCIL_TEST, snapshot.stencilEnabled);
+    setEnabled(GL_SCISSOR_TEST, snapshot.scissorEnabled);
+
+#ifndef SFML_OPENGL_ES
+    if (GLEXT_framebuffer_sRGB)
+        setEnabled(GL_FRAMEBUFFER_SRGB, snapshot.framebufferSrgbEnabled);
+#endif
+
+    return true;
+}
+
 // Mutex to protect ID generation and our context-RenderTarget-map
 std::recursive_mutex& getMutex()
 {
@@ -354,62 +768,50 @@ void RenderTarget::draw(const Vertex* vertices, std::size_t vertexCount, Primiti
 
     if (RenderTargetImpl::isActive(m_id) || setActive(true))
     {
-        // Check if the vertex count is low enough so that we can pre-transform them
-        const bool useVertexCache = (vertexCount <= m_cache.vertexCache.size());
+        auto& renderer = RenderTargetImpl::getRendererResources();
+        if (!setupDraw(states))
+            return;
 
-        if (useVertexCache)
+        if (!renderer.vertexBuffer.update(vertices, vertexCount, 0))
         {
-            // Pre-transform the vertices and store them into the vertex cache
-            for (std::size_t i = 0; i < vertexCount; ++i)
-            {
-                Vertex& vertex   = m_cache.vertexCache[i];
-                vertex.position  = states.transform * vertices[i].position;
-                vertex.color     = vertices[i].color;
-                vertex.texCoords = vertices[i].texCoords;
-            }
+            err() << "Failed to stream vertices to SFML's internal renderer buffer" << std::endl;
+            return;
         }
 
-        setupDraw(useVertexCache, states);
+        VertexBuffer::bind(&renderer.vertexBuffer);
 
-        // Check if texture coordinates array is needed, and update client state accordingly
-        const bool enableTexCoordsArray = (states.texture || states.shader);
-        if (!m_cache.enable || (enableTexCoordsArray != m_cache.texCoordsArrayEnabled))
+#ifndef SFML_OPENGL_ES
+        if (renderer.coreProfile)
         {
-            if (enableTexCoordsArray)
-                glCheck(glEnableClientState(GL_TEXTURE_COORD_ARRAY));
-            else
-                glCheck(glDisableClientState(GL_TEXTURE_COORD_ARRAY));
-        }
+            if (!renderer.vertexArray)
+                glCheck(renderer.genVertexArrays(1, &renderer.vertexArray));
 
-        // If we switch between non-cache and cache mode or enable texture
-        // coordinates we need to set up the pointers to the vertices' components
-        if (!m_cache.enable || !useVertexCache || !m_cache.useVertexCache)
+            glCheck(renderer.bindVertexArray(renderer.vertexArray));
+        }
+#endif
+
+        glCheck(glEnableVertexAttribArray(0));
+        glCheck(glEnableVertexAttribArray(1));
+        glCheck(glEnableVertexAttribArray(2));
+        glCheck(glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<const void*>(0)));
+        glCheck(glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vertex), reinterpret_cast<const void*>(8)));
+        glCheck(glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<const void*>(12)));
+
+#if !defined(SFML_OPENGL_ES)
+        if (!renderer.coreProfile)
         {
-            const auto* data = reinterpret_cast<const std::byte*>(vertices);
-
-            // If we pre-transform the vertices, we must use our internal vertex cache
-            if (useVertexCache)
-                data = reinterpret_cast<const std::byte*>(m_cache.vertexCache.data());
-
-            glCheck(glVertexPointer(2, GL_FLOAT, sizeof(Vertex), data + 0));
-            glCheck(glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(Vertex), data + 8));
-            if (enableTexCoordsArray)
-                glCheck(glTexCoordPointer(2, GL_FLOAT, sizeof(Vertex), data + 12));
+            glCheck(glEnableVertexAttribArray(3));
+            glCheck(glEnableVertexAttribArray(8));
+            glCheck(
+                glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vertex), reinterpret_cast<const void*>(8)));
+            glCheck(glVertexAttribPointer(8, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<const void*>(12)));
         }
-        else if (enableTexCoordsArray && !m_cache.texCoordsArrayEnabled)
-        {
-            // If we enter this block, we are already using our internal vertex cache
-            const auto* data = reinterpret_cast<const std::byte*>(m_cache.vertexCache.data());
-
-            glCheck(glTexCoordPointer(2, GL_FLOAT, sizeof(Vertex), data + 12));
-        }
+#endif
 
         drawPrimitives(type, 0, vertexCount);
-        cleanupDraw(states);
 
-        // Update the cache
-        m_cache.useVertexCache        = useVertexCache;
-        m_cache.texCoordsArrayEnabled = enableTexCoordsArray;
+        VertexBuffer::bind(nullptr);
+        cleanupDraw(states);
     }
 }
 
@@ -444,18 +846,40 @@ void RenderTarget::draw(const VertexBuffer& vertexBuffer, std::size_t firstVerte
 
     if (RenderTargetImpl::isActive(m_id) || setActive(true))
     {
-        setupDraw(false, states);
+        if (!setupDraw(states))
+            return;
 
         // Bind vertex buffer
         VertexBuffer::bind(&vertexBuffer);
 
-        // Always enable texture coordinates
-        if (!m_cache.enable || !m_cache.texCoordsArrayEnabled)
-            glCheck(glEnableClientState(GL_TEXTURE_COORD_ARRAY));
+#ifndef SFML_OPENGL_ES
+        auto& renderer = RenderTargetImpl::getRendererResources();
+        if (renderer.coreProfile)
+        {
+            if (!renderer.vertexArray)
+                glCheck(renderer.genVertexArrays(1, &renderer.vertexArray));
 
-        glCheck(glVertexPointer(2, GL_FLOAT, sizeof(Vertex), reinterpret_cast<const void*>(0)));
-        glCheck(glColorPointer(4, GL_UNSIGNED_BYTE, sizeof(Vertex), reinterpret_cast<const void*>(8)));
-        glCheck(glTexCoordPointer(2, GL_FLOAT, sizeof(Vertex), reinterpret_cast<const void*>(12)));
+            glCheck(renderer.bindVertexArray(renderer.vertexArray));
+        }
+#endif
+
+        glCheck(glEnableVertexAttribArray(0));
+        glCheck(glEnableVertexAttribArray(1));
+        glCheck(glEnableVertexAttribArray(2));
+        glCheck(glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<const void*>(0)));
+        glCheck(glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vertex), reinterpret_cast<const void*>(8)));
+        glCheck(glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<const void*>(12)));
+
+#if !defined(SFML_OPENGL_ES)
+        if (!renderer.coreProfile)
+        {
+            glCheck(glEnableVertexAttribArray(3));
+            glCheck(glEnableVertexAttribArray(8));
+            glCheck(
+                glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vertex), reinterpret_cast<const void*>(8)));
+            glCheck(glVertexAttribPointer(8, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<const void*>(12)));
+        }
+#endif
 
         drawPrimitives(vertexBuffer.getPrimitiveType(), firstVertex, vertexCount);
 
@@ -463,10 +887,6 @@ void RenderTarget::draw(const VertexBuffer& vertexBuffer, std::size_t firstVerte
         VertexBuffer::bind(nullptr);
 
         cleanupDraw(states);
-
-        // Update the cache
-        m_cache.useVertexCache        = false;
-        m_cache.texCoordsArrayEnabled = true;
     }
 }
 
@@ -534,16 +954,7 @@ void RenderTarget::pushGLStates()
         }
 #endif
 
-#ifndef SFML_OPENGL_ES
-        glCheck(glPushClientAttrib(GL_CLIENT_ALL_ATTRIB_BITS));
-        glCheck(glPushAttrib(GL_ALL_ATTRIB_BITS));
-#endif
-        glCheck(glMatrixMode(GL_MODELVIEW));
-        glCheck(glPushMatrix());
-        glCheck(glMatrixMode(GL_PROJECTION));
-        glCheck(glPushMatrix());
-        glCheck(glMatrixMode(GL_TEXTURE));
-        glCheck(glPushMatrix());
+        RenderTargetImpl::pushGLStateSnapshot();
     }
 
     resetGLStates();
@@ -555,16 +966,8 @@ void RenderTarget::popGLStates()
 {
     if (RenderTargetImpl::isActive(m_id) || setActive(true))
     {
-        glCheck(glMatrixMode(GL_PROJECTION));
-        glCheck(glPopMatrix());
-        glCheck(glMatrixMode(GL_MODELVIEW));
-        glCheck(glPopMatrix());
-        glCheck(glMatrixMode(GL_TEXTURE));
-        glCheck(glPopMatrix());
-#ifndef SFML_OPENGL_ES
-        glCheck(glPopClientAttrib());
-        glCheck(glPopAttrib());
-#endif
+        if (!RenderTargetImpl::popGLStateSnapshot())
+            err() << "sf::RenderTarget::popGLStates called without a matching pushGLStates" << std::endl;
     }
 }
 
@@ -573,8 +976,7 @@ void RenderTarget::popGLStates()
 void RenderTarget::resetGLStates()
 {
     // Check here to make sure a context change does not happen after activate(true)
-    const bool shaderAvailable       = Shader::isAvailable();
-    const bool vertexBufferAvailable = VertexBuffer::isAvailable();
+    const bool shaderAvailable = Shader::isAvailable();
 
 // Workaround for states not being properly reset on
 // macOS unless a context switch really takes place
@@ -592,25 +994,14 @@ void RenderTarget::resetGLStates()
 
         // Make sure that the texture unit which is active is the number 0
         if (GLEXT_multitexture)
-        {
-            glCheck(GLEXT_glClientActiveTexture(GLEXT_GL_TEXTURE0));
             glCheck(GLEXT_glActiveTexture(GLEXT_GL_TEXTURE0));
-        }
 
         // Define the default OpenGL states
         glCheck(glDisable(GL_CULL_FACE));
-        glCheck(glDisable(GL_LIGHTING));
         glCheck(glDisable(GL_STENCIL_TEST));
         glCheck(glDisable(GL_DEPTH_TEST));
-        glCheck(glDisable(GL_ALPHA_TEST));
         glCheck(glDisable(GL_SCISSOR_TEST));
-        glCheck(glEnable(GL_TEXTURE_2D));
         glCheck(glEnable(GL_BLEND));
-        glCheck(glMatrixMode(GL_MODELVIEW));
-        glCheck(glLoadIdentity());
-        glCheck(glEnableClientState(GL_VERTEX_ARRAY));
-        glCheck(glEnableClientState(GL_COLOR_ARRAY));
-        glCheck(glEnableClientState(GL_TEXTURE_COORD_ARRAY));
         glCheck(glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE));
         m_cache.scissorEnabled = false;
         m_cache.stencilEnabled = false;
@@ -622,13 +1013,6 @@ void RenderTarget::resetGLStates()
         applyTexture(nullptr);
         if (shaderAvailable)
             applyShader(nullptr);
-
-        if (vertexBufferAvailable)
-            glCheck(VertexBuffer::bind(nullptr));
-
-        m_cache.texCoordsArrayEnabled = true;
-
-        m_cache.useVertexCache = false;
 
         // Set the default view
         setView(getView());
@@ -683,13 +1067,6 @@ void RenderTarget::applyCurrentView()
             m_cache.scissorEnabled = true;
         }
     }
-
-    // Set the projection matrix
-    glCheck(glMatrixMode(GL_PROJECTION));
-    glCheck(glLoadMatrixf(m_view.getTransform().getMatrix()));
-
-    // Go back to model-view mode
-    glCheck(glMatrixMode(GL_MODELVIEW));
 
     m_cache.viewChanged = false;
 }
@@ -786,21 +1163,9 @@ void RenderTarget::applyStencilMode(const StencilMode& mode)
 
 
 ////////////////////////////////////////////////////////////
-void RenderTarget::applyTransform(const Transform& transform)
-{
-    // No need to call glMatrixMode(GL_MODELVIEW), it is always the
-    // current mode (for optimization purpose, since it's the most used)
-    if (transform == Transform::Identity)
-        glCheck(glLoadIdentity());
-    else
-        glCheck(glLoadMatrixf(transform.getMatrix()));
-}
-
-
-////////////////////////////////////////////////////////////
 void RenderTarget::applyTexture(const Texture* texture, CoordinateType coordinateType)
 {
-    Texture::bind(texture, coordinateType);
+    Texture::bindForRendering(texture);
 
     m_cache.lastTextureId      = texture ? texture->m_cacheId : 0;
     m_cache.lastCoordinateType = coordinateType;
@@ -815,7 +1180,7 @@ void RenderTarget::applyShader(const Shader* shader)
 
 
 ////////////////////////////////////////////////////////////
-void RenderTarget::setupDraw(bool useVertexCache, const RenderStates& states)
+bool RenderTarget::setupDraw(const RenderStates& states)
 {
     // GL_FRAMEBUFFER_SRGB is not available on OpenGL ES
     // If a framebuffer supports sRGB, it will always be enabled on OpenGL ES
@@ -834,17 +1199,6 @@ void RenderTarget::setupDraw(bool useVertexCache, const RenderStates& states)
     // First set the persistent OpenGL states if it's the very first call
     if (!m_cache.glStatesSet)
         resetGLStates();
-
-    if (useVertexCache)
-    {
-        // Since vertices are transformed, we must use an identity transform to render them
-        if (!m_cache.enable || !m_cache.useVertexCache)
-            glCheck(glLoadIdentity());
-    }
-    else
-    {
-        applyTransform(states.transform);
-    }
 
     // Apply the view
     if (!m_cache.enable || m_cache.viewChanged)
@@ -883,6 +1237,42 @@ void RenderTarget::setupDraw(bool useVertexCache, const RenderStates& states)
     // Apply the shader
     if (states.shader)
         applyShader(states.shader);
+    else
+    {
+        auto& renderer = RenderTargetImpl::getRendererResources();
+        if (!renderer.shader.getNativeHandle())
+            return false;
+
+        const Transform matrix = m_view.getTransform() * states.transform;
+        renderer.shader.setUniform("matrix", Glsl::Mat4(matrix));
+        renderer.shader.setUniform("hasTexture", states.texture ? 1 : 0);
+
+        Glsl::Vec4 textureTransform(1.f, 1.f, 0.f, 0.f);
+        if (states.texture)
+        {
+            const Texture& texture = *states.texture;
+            if (states.coordinateType == CoordinateType::Pixels)
+            {
+                textureTransform.x = 1.f / static_cast<float>(texture.m_actualSize.x);
+                textureTransform.y = 1.f / static_cast<float>(texture.m_actualSize.y);
+            }
+            else if (texture.m_size != texture.m_actualSize)
+            {
+                textureTransform.x = static_cast<float>(texture.m_size.x) / static_cast<float>(texture.m_actualSize.x);
+                textureTransform.y = static_cast<float>(texture.m_size.y) / static_cast<float>(texture.m_actualSize.y);
+            }
+
+            if (texture.m_pixelsFlipped)
+            {
+                textureTransform.y = -textureTransform.y;
+                textureTransform.w = static_cast<float>(texture.m_size.y) / static_cast<float>(texture.m_actualSize.y);
+            }
+        }
+        renderer.shader.setUniform("textureTransform", textureTransform);
+        applyShader(&renderer.shader);
+    }
+
+    return true;
 }
 
 
@@ -902,9 +1292,8 @@ void RenderTarget::drawPrimitives(PrimitiveType type, std::size_t firstVertex, s
 ////////////////////////////////////////////////////////////
 void RenderTarget::cleanupDraw(const RenderStates& states)
 {
-    // Unbind the shader, if any
-    if (states.shader)
-        applyShader(nullptr);
+    // Unbind the shader
+    applyShader(nullptr);
 
     // If the texture we used to draw belonged to a RenderTexture, then forcibly unbind that texture.
     // This prevents a bug where some drivers do not clear RenderTextures properly.
@@ -926,9 +1315,9 @@ void RenderTarget::cleanupDraw(const RenderStates& states)
 // Render states caching strategies
 //
 // * View
-//   If SetView was called since last draw, the projection
-//   matrix is updated. We don't need more, the view doesn't
-//   change frequently.
+//   If SetView was called since last draw, the view uniform
+//   is updated. We don't need more, the view doesn't change
+//   frequently.
 //
 // * Transform
 //   The transform matrix is usually expensive because each
@@ -936,7 +1325,7 @@ void RenderTarget::cleanupDraw(const RenderStates& states)
 //   lead, in worst case, to changing it every 4 vertices.
 //   To avoid that, when the vertex count is low enough, we
 //   pre-transform them and therefore use an identity transform
-//   to render them.
+//   in the shader.
 //
 // * Blending mode
 //   Since it overloads the == operator, we can easily check

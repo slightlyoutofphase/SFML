@@ -40,6 +40,9 @@
 #endif
 
 #include <ostream>
+#include <string_view>
+
+#include <cstdio>
 
 #if !defined(GL_MAJOR_VERSION)
 #define GL_MAJOR_VERSION 0x821B
@@ -87,6 +90,57 @@ void extensionSanityCheck()
 namespace sf::priv
 {
 ////////////////////////////////////////////////////////////
+bool isCoreProfile()
+{
+#ifdef SFML_OPENGL_ES
+    return false;
+#else
+    ensureExtensionsInit();
+
+    const auto* versionString = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    if (!versionString)
+        return false;
+
+    unsigned int majorVersion = 0;
+    unsigned int minorVersion = 0;
+    if (std::sscanf(versionString, "%u.%u", &majorVersion, &minorVersion) != 2)
+        return false;
+
+    if (majorVersion > 3 || (majorVersion == 3 && minorVersion >= 2))
+    {
+        GLint profile = 0;
+        glGetIntegerv(GL_CONTEXT_PROFILE_MASK, &profile);
+        return (profile & GL_CONTEXT_CORE_PROFILE_BIT) != 0;
+    }
+
+    if ((majorVersion != 3) || (minorVersion != 1))
+        return false;
+
+    const auto* extensionString = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+    if (!extensionString)
+        return true;
+
+    const std::string_view     extensions(extensionString);
+    constexpr std::string_view compatibilityExtension = "GL_ARB_compatibility";
+
+    std::size_t position = extensions.find(compatibilityExtension);
+    while (position != std::string_view::npos)
+    {
+        const bool startsAtBoundary = position == 0 || extensions[position - 1] == ' ';
+        const bool endsAtBoundary   = position + compatibilityExtension.size() == extensions.size() ||
+                                      extensions[position + compatibilityExtension.size()] == ' ';
+
+        if (startsAtBoundary && endsAtBoundary)
+            return false;
+
+        position = extensions.find(compatibilityExtension, position + compatibilityExtension.size());
+    }
+
+    return true;
+#endif
+}
+
+////////////////////////////////////////////////////////////
 void ensureExtensionsInit()
 {
     static bool initialized = false;
@@ -95,7 +149,11 @@ void ensureExtensionsInit()
         initialized = true;
 
 #ifdef SFML_OPENGL_ES
+#ifdef SFML_OPENGL_ES_2
+        gladLoadGL(Context::getFunction);
+#else
         gladLoadGLES1(Context::getFunction);
+#endif
 #else
         gladLoadGL(Context::getFunction);
 #endif

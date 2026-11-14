@@ -3,14 +3,14 @@
 ////////////////////////////////////////////////////////////
 #include <SFML/Graphics.hpp>
 
+#include <SFML/System/Angle.hpp>
+
+#include <OpenGLRenderer.hpp>
 #include <array>
 #include <filesystem>
 #include <iostream>
 
 #include <cstdlib>
-
-#define GLAD_GL_IMPLEMENTATION
-#include <gl.h>
 
 #ifdef SFML_SYSTEM_IOS
 #include <SFML/Main.hpp>
@@ -92,12 +92,11 @@ int main()
             return EXIT_FAILURE;
         }
 
-        // Load OpenGL or OpenGL ES entry points using glad
-#ifdef SFML_OPENGL_ES
-        gladLoadGLES1(sf::Context::getFunction);
-#else
-        gladLoadGL(sf::Context::getFunction);
-#endif
+        if (!loadOpenGLFunctions())
+        {
+            std::cerr << "Failed to load OpenGL functions" << std::endl;
+            return EXIT_FAILURE;
+        }
 
         // Enable Z-buffer read and write
         glEnable(GL_DEPTH_TEST);
@@ -108,24 +107,10 @@ int main()
         glClearDepth(1.f);
 #endif
 
-        // Disable lighting
-        glDisable(GL_LIGHTING);
-
         // Configure the viewport (the same size as the window)
         glViewport(0, 0, static_cast<GLsizei>(window.getSize().x), static_cast<GLsizei>(window.getSize().y));
 
-        // Setup a perspective projection
-        glMatrixMode(GL_PROJECTION);
-        glLoadIdentity();
-        const GLfloat ratio = static_cast<float>(window.getSize().x) / static_cast<float>(window.getSize().y);
-#ifdef SFML_OPENGL_ES
-        glFrustumf(-ratio, ratio, -1.f, 1.f, 1.f, 500.f);
-#else
-        glFrustum(-ratio, ratio, -1.f, 1.f, 1.f, 500.f);
-#endif
-
         // Bind the texture
-        glEnable(GL_TEXTURE_2D);
         sf::Texture::bind(&texture);
 
         // Define a 3D cube (6 faces made of 2 triangles composed by 3 vertices)
@@ -177,15 +162,12 @@ int main()
         };
         // clang-format on
 
-        // Enable position and texture coordinates vertex components
-        glEnableClientState(GL_VERTEX_ARRAY);
-        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-        glVertexPointer(3, GL_FLOAT, 5 * sizeof(GLfloat), cube.data());
-        glTexCoordPointer(2, GL_FLOAT, 5 * sizeof(GLfloat), cube.data() + 3);
-
-        // Disable normal and color vertex components
-        glDisableClientState(GL_NORMAL_ARRAY);
-        glDisableClientState(GL_COLOR_ARRAY);
+        OpenGLRenderer renderer;
+        if (!renderer.create(cube.data(), 36, static_cast<GLsizei>(5 * sizeof(GLfloat)), 0, true))
+        {
+            std::cerr << "Failed to initialize the OpenGL renderer" << std::endl;
+            return EXIT_FAILURE;
+        }
 
         // Make the window no longer the active window for OpenGL calls
         if (!window.setActive(false))
@@ -257,14 +239,6 @@ int main()
 
                     const auto [width, height] = resized->size;
                     glViewport(0, 0, static_cast<GLsizei>(width), static_cast<GLsizei>(height));
-                    glMatrixMode(GL_PROJECTION);
-                    glLoadIdentity();
-                    const GLfloat newRatio = static_cast<float>(width) / static_cast<float>(height);
-#ifdef SFML_OPENGL_ES
-                    glFrustumf(-newRatio, newRatio, -1.f, 1.f, 1.f, 500.f);
-#else
-                    glFrustum(-newRatio, newRatio, -1.f, 1.f, 1.f, 500.f);
-#endif
 
                     // Make the window no longer the active window for OpenGL calls
                     if (!window.setActive(false))
@@ -304,16 +278,13 @@ int main()
             const float x = static_cast<float>(pos.x) * 200.f / static_cast<float>(window.getSize().x) - 100.f;
             const float y = -static_cast<float>(pos.y) * 200.f / static_cast<float>(window.getSize().y) + 100.f;
 
-            // Apply some transformations
-            glMatrixMode(GL_MODELVIEW);
-            glLoadIdentity();
-            glTranslatef(x, y, -100.f);
-            glRotatef(clock.getElapsedTime().asSeconds() * 50.f, 1.f, 0.f, 0.f);
-            glRotatef(clock.getElapsedTime().asSeconds() * 30.f, 0.f, 1.f, 0.f);
-            glRotatef(clock.getElapsedTime().asSeconds() * 90.f, 0.f, 0.f, 1.f);
-
-            // Draw the cube
-            glDrawArrays(GL_TRIANGLES, 0, 36);
+            const float elapsedTime = clock.getElapsedTime().asSeconds();
+            renderer.draw(window.getSize(),
+                          {x, y, -100.f},
+                          {sf::degrees(elapsedTime * 50.f).asRadians(),
+                           sf::degrees(elapsedTime * 30.f).asRadians(),
+                           sf::degrees(elapsedTime * 90.f).asRadians()},
+                          true);
 
             // Make the window no longer the active window for OpenGL calls
             if (!window.setActive(false))

@@ -684,14 +684,10 @@ public:
     /// // draw OpenGL stuff that use no texture...
     /// \endcode
     ///
-    /// The `coordinateType` argument controls how texture
-    /// coordinates will be interpreted. If Normalized (the default), they
-    /// must be in range [0 .. 1], which is the default way of handling
-    /// texture coordinates with OpenGL. If Pixels, they must be given
-    /// in pixels (range [0 .. size]). This mode is used internally by
-    /// the graphics classes of SFML, it makes the definition of texture
-    /// coordinates more intuitive for the high-level API, users don't need
-    /// to compute normalized values.
+    /// Texture-coordinate conversion is applied by SFML's own drawing
+    /// shaders. When using this function with custom OpenGL rendering,
+    /// the shader must perform any required coordinate conversion itself.
+    /// The `coordinateType` argument is retained for API compatibility.
     ///
     /// \param texture Pointer to the texture to bind, can be null to use no texture
     /// \param coordinateType Type of texture coordinates to use
@@ -715,6 +711,8 @@ private:
     friend class Text;
     friend class RenderTexture;
     friend class RenderTarget;
+
+    static void bindForRendering(const Texture* texture);
 
     ////////////////////////////////////////////////////////////
     /// \brief Get a valid image size according to hardware support

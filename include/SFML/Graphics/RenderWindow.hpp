@@ -272,8 +272,7 @@ private:
 /// sf::Text text(font);
 /// ...
 ///
-/// // Perform OpenGL initializations
-/// glMatrixMode(GL_PROJECTION);
+/// // Perform OpenGL initializations (create shaders, buffers, etc.)
 /// ...
 ///
 /// // Start the rendering loop
@@ -287,11 +286,8 @@ private:
 ///     window.draw(sprite);
 ///     window.popGLStates();
 ///
-///     // Draw a 3D object using OpenGL
-///     glBegin(GL_TRIANGLES);
-///         glVertex3f(...);
-///         ...
-///     glEnd();
+///     // Draw a 3D object using programmable OpenGL
+///     drawOpenGLObject();
 ///
 ///     // Draw text on top of the 3D object
 ///     window.pushGLStates();

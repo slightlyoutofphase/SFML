@@ -383,7 +383,7 @@ public:
     [[nodiscard]] virtual bool setActive(bool active = true);
 
     ////////////////////////////////////////////////////////////
-    /// \brief Save the current OpenGL render states and matrices
+    /// \brief Save the current OpenGL render states
     ///
     /// This function can be used when you mix SFML drawing
     /// and direct OpenGL rendering. Combined with popGLStates,
@@ -403,8 +403,8 @@ public:
     /// \endcode
     ///
     /// Note that this function is quite expensive: it saves all the
-    /// possible OpenGL states and matrices, even the ones you
-    /// don't care about. Therefore it should be used wisely.
+    /// OpenGL states changed by SFML, even the ones you don't care
+    /// about. Therefore it should be used wisely.
     /// It is provided for convenience, but the best results will
     /// be achieved if you handle OpenGL states yourself (because
     /// you know which states have really changed, and need to be
@@ -417,7 +417,7 @@ public:
     void pushGLStates();
 
     ////////////////////////////////////////////////////////////
-    /// \brief Restore the previously saved OpenGL render states and matrices
+    /// \brief Restore the previously saved OpenGL render states
     ///
     /// See the description of `pushGLStates` to get a detailed
     /// description of these functions.
@@ -439,12 +439,11 @@ public:
     /// Example:
     /// \code
     /// // OpenGL code here...
-    /// glPushAttrib(...);
+    /// // Save any OpenGL state that your own code needs to preserve.
     /// window.resetGLStates();
     /// window.draw(...);
     /// window.draw(...);
-    /// glPopAttrib(...);
-    /// // OpenGL code here...
+    /// // Restore the OpenGL state saved by your code.
     /// \endcode
     ///
     ////////////////////////////////////////////////////////////
@@ -490,14 +489,6 @@ private:
     void applyStencilMode(const StencilMode& mode);
 
     ////////////////////////////////////////////////////////////
-    /// \brief Apply a new transform
-    ///
-    /// \param transform Transform to apply
-    ///
-    ////////////////////////////////////////////////////////////
-    void applyTransform(const Transform& transform);
-
-    ////////////////////////////////////////////////////////////
     /// \brief Apply a new texture
     ///
     /// \param texture        Texture to apply
@@ -517,11 +508,10 @@ private:
     ////////////////////////////////////////////////////////////
     /// \brief Setup environment for drawing
     ///
-    /// \param useVertexCache Are we going to use the vertex cache?
     /// \param states         Render states to use for drawing
     ///
     ////////////////////////////////////////////////////////////
-    void setupDraw(bool useVertexCache, const RenderStates& states);
+    bool setupDraw(const RenderStates& states);
 
     ////////////////////////////////////////////////////////////
     /// \brief Draw the primitives
@@ -547,18 +537,15 @@ private:
     ////////////////////////////////////////////////////////////
     struct StatesCache
     {
-        bool                  enable{};                //!< Is the cache enabled?
-        bool                  glStatesSet{};           //!< Are our internal GL states set yet?
-        bool                  viewChanged{};           //!< Has the current view changed since last draw?
-        bool                  scissorEnabled{};        //!< Is scissor testing enabled?
-        bool                  stencilEnabled{};        //!< Is stencil testing enabled?
-        BlendMode             lastBlendMode;           //!< Cached blending mode
-        StencilMode           lastStencilMode;         //!< Cached stencil
-        std::uint64_t         lastTextureId{};         //!< Cached texture
-        CoordinateType        lastCoordinateType{};    //!< Texture coordinate type
-        bool                  texCoordsArrayEnabled{}; //!< Is `GL_TEXTURE_COORD_ARRAY` client state enabled?
-        bool                  useVertexCache{};        //!< Did we previously use the vertex cache?
-        std::array<Vertex, 4> vertexCache{};           //!< Pre-transformed vertices cache
+        bool           enable{};             //!< Is the cache enabled?
+        bool           glStatesSet{};        //!< Are our internal GL states set yet?
+        bool           viewChanged{};        //!< Has the current view changed since last draw?
+        bool           scissorEnabled{};     //!< Is scissor testing enabled?
+        bool           stencilEnabled{};     //!< Is stencil testing enabled?
+        BlendMode      lastBlendMode;        //!< Cached blending mode
+        StencilMode    lastStencilMode;      //!< Cached stencil
+        std::uint64_t  lastTextureId{};      //!< Cached texture
+        CoordinateType lastCoordinateType{}; //!< Texture coordinate type
     };
 
     ////////////////////////////////////////////////////////////

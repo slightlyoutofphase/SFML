@@ -55,8 +55,8 @@ struct ContextSettings
     unsigned int  depthBits{};                        //!< Bits of the depth buffer
     unsigned int  stencilBits{};                      //!< Bits of the stencil buffer
     unsigned int  antiAliasingLevel{};                //!< Level of anti-aliasing
-    unsigned int  majorVersion{1};                    //!< Major number of the context version to create
-    unsigned int  minorVersion{1};                    //!< Minor number of the context version to create
+    unsigned int  majorVersion{2};                    //!< Major number of the context version to create
+    unsigned int  minorVersion{};                     //!< Minor number of the context version to create
     std::uint32_t attributeFlags{Attribute::Default}; //!< The attribute flags to create the context with
     bool          sRgbCapable{};                      //!< Whether the context framebuffer is sRGB capable
 };
@@ -71,10 +71,9 @@ struct ContextSettings
 /// ContextSettings allows to define several advanced settings
 /// of the OpenGL context attached to a window. All these
 /// settings with the exception of the compatibility flag
-/// and anti-aliasing level have no impact on the regular
-/// SFML rendering (graphics module), so you may need to use
-/// this structure only if you're using SFML as a windowing
-/// system for custom OpenGL rendering.
+/// and anti-aliasing level have no impact on regular SFML
+/// rendering. The graphics module requires OpenGL 2.0 or
+/// OpenGL ES 2.0 or newer.
 ///
 /// The depthBits and stencilBits members define the number
 /// of bits per pixel requested for the (respectively) depth
@@ -84,22 +83,16 @@ struct ContextSettings
 /// multisampling levels for anti-aliasing.
 ///
 /// majorVersion and minorVersion define the version of the
-/// OpenGL context that you want. Only versions greater or
-/// equal to 3.0 are relevant; versions lesser than 3.0 are
-/// all handled the same way (i.e. you can use any version
-/// < 3.0 if you don't want an OpenGL 3 context).
+/// OpenGL context that you want. The default is OpenGL 2.0,
+/// which is the minimum required by the graphics module.
 ///
 /// When requesting a context with a version greater or equal
 /// to 3.2, you have the option of specifying whether the
 /// context should follow the core or compatibility profile
 /// of all newer (>= 3.2) OpenGL specifications. For versions
-/// 3.0 and 3.1 there is only the core profile. By default
-/// a compatibility context is created. You only need to specify
-/// the core flag if you want a core profile context to use with
-/// your own OpenGL rendering.
-/// <b>Warning: The graphics module will not function if you
-/// request a core profile context. Make sure the attributes are
-/// set to Default if you want to use the graphics module.</b>
+/// 3.0 and 3.1 there is only the core profile. The graphics
+/// module supports core contexts; custom shaders must use
+/// GLSL syntax supported by the selected profile.
 ///
 /// Setting the debug attribute flag will request a context with
 /// additional debugging features enabled. Depending on the

@@ -107,6 +107,7 @@ namespace sf::priv
 EglContext::EglContext(EglContext* shared)
 {
     EglContextImpl::ensureInit();
+    m_settings = ContextSettings{};
 
     // Get the initialized EGL display
     m_display = EglContextImpl::getInitializedDisplay();
@@ -133,6 +134,7 @@ EglContext::EglContext(EglContext*                        shared,
                        unsigned int                       bitsPerPixel)
 {
     EglContextImpl::ensureInit();
+    m_settings = settings;
 
 #ifdef SFML_SYSTEM_ANDROID
 
@@ -238,7 +240,7 @@ void EglContext::setVerticalSyncEnabled(bool enabled)
 ////////////////////////////////////////////////////////////
 void EglContext::createContext(EglContext* shared)
 {
-    static constexpr std::array contextVersion = {EGL_CONTEXT_CLIENT_VERSION, 1, EGL_NONE};
+    const std::array contextVersion = {EGL_CONTEXT_CLIENT_VERSION, static_cast<EGLint>(m_settings.majorVersion), EGL_NONE};
 
     const EGLContext toShared = shared ? shared->m_context : EGL_NO_CONTEXT;
     if (toShared != EGL_NO_CONTEXT)
@@ -293,7 +295,12 @@ EGLConfig EglContext::getBestConfig(EGLDisplay display, unsigned int bitsPerPixe
         int renderableType = 0;
         eglCheck(eglGetConfigAttrib(display, configs[i], EGL_SURFACE_TYPE, &surfaceType));
         eglCheck(eglGetConfigAttrib(display, configs[i], EGL_RENDERABLE_TYPE, &renderableType));
-        if (!(surfaceType & (EGL_WINDOW_BIT | EGL_PBUFFER_BIT)) || !(renderableType & EGL_OPENGL_ES_BIT))
+#ifdef SFML_OPENGL_ES_2
+        constexpr EGLint renderableBit = EGL_OPENGL_ES2_BIT;
+#else
+        constexpr EGLint renderableBit = EGL_OPENGL_ES_BIT;
+#endif
+        if (!(surfaceType & (EGL_WINDOW_BIT | EGL_PBUFFER_BIT)) || !(renderableType & renderableBit))
             continue;
 
         // Extract the components of the current config
@@ -344,8 +351,6 @@ EGLConfig EglContext::getBestConfig(EGLDisplay display, unsigned int bitsPerPixe
 ////////////////////////////////////////////////////////////
 void EglContext::updateSettings()
 {
-    m_settings.majorVersion      = 1;
-    m_settings.minorVersion      = 1;
     m_settings.attributeFlags    = ContextSettings::Default;
     m_settings.depthBits         = 0;
     m_settings.stencilBits       = 0;

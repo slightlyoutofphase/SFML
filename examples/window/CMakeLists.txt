@@ -6,5 +6,5 @@ sfml_add_example(window GUI_APP
                  SOURCES ${SRC}
                  DEPENDS SFML::Window)
 
-# external dependency headers
-target_include_directories(window SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/examples/include)
+# shared example headers
+target_include_directories(window PRIVATE ${PROJECT_SOURCE_DIR}/examples/include)

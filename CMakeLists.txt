@@ -123,7 +123,7 @@ endif()
 
 # define SFML_OPENGL_ES if needed
 if(SFML_OPENGL_ES)
-    add_definitions(-DSFML_OPENGL_ES)
+    add_definitions(-DSFML_OPENGL_ES -DSFML_OPENGL_ES_2)
     add_definitions(-DGL_GLEXT_PROTOTYPES)
 endif()
 

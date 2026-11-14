@@ -76,11 +76,12 @@ public:
     ///
     /// This function returns a pointer to an array of 16 floats
     /// containing the transform elements as a 4x4 matrix, which
-    /// is directly compatible with OpenGL functions.
+    /// can be uploaded to a shader uniform.
     ///
     /// \code
     /// sf::Transform transform = ...;
-    /// glLoadMatrixf(transform.getMatrix());
+    /// GLint location = ...;
+    /// glUniformMatrix4fv(location, 1, GL_FALSE, transform.getMatrix());
     /// \endcode
     ///
     /// \return Pointer to a 4x4 matrix
